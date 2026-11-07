@@ -37,6 +37,8 @@ std::optional<LaunchArgs> parseArgs(int argc, const char* const* argv) {
         else if (!std::strcmp(key, "--states")) a.states = value;
         else if (!std::strcmp(key, "--return")) a.returnPath = value;
         else if (!std::strcmp(key, "--resume")) a.resumeToken = value;
+        else if (!std::strcmp(key, "--cover")) a.cover = value;
+        else if (!std::strcmp(key, "--video")) a.video = value;
     }
     if (a.protocol != kProtocolVersion || a.rom.empty() || a.returnPath.empty()) return std::nullopt;
     return a;

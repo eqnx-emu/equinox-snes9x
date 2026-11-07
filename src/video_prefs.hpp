@@ -37,6 +37,11 @@ struct VideoSettings {
 VideoPrefs parsePrefs(std::string_view json);
 std::string serializePrefs(const VideoPrefs& prefs);
 
+// A missing or unreadable file is empty prefs.
+VideoPrefs loadPrefs(const std::string& path);
+// Empty prefs delete the file. Returns false on failure; never throws.
+bool savePrefs(const std::string& path, const VideoPrefs& prefs);
+
 // Game over global over the spec defaults.
 VideoSettings resolve(const VideoPrefs& global, const VideoPrefs& game);
 // Only the keys of `effective` that differ from `global`.

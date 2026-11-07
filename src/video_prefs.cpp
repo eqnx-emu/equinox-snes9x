@@ -1,6 +1,9 @@
 #include "video_prefs.hpp"
 
+#include "file_io.hpp"
+
 #include <cctype>
+#include <filesystem>
 
 namespace {
 
@@ -174,3 +177,21 @@ const char* toId(Size v) { return idOf(kSizes, v); }
 const char* toId(Smooth v) { return idOf(kSmooths, v); }
 const char* toId(Filter v) { return idOf(kFilters, v); }
 const char* toId(Border v) { return idOf(kBorders, v); }
+
+VideoPrefs loadPrefs(const std::string& path) {
+    const auto bytes = readFile(path);
+    if (!bytes) return {};
+    return parsePrefs(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
+}
+
+bool savePrefs(const std::string& path, const VideoPrefs& prefs) {
+    namespace fs = std::filesystem;
+    if (prefs.empty()) {
+        std::error_code ec;
+        const fs::path p(std::u8string(path.begin(), path.end()));
+        fs::remove(p, ec);
+        return !ec;
+    }
+    const std::string json = serializePrefs(prefs);
+    return writeFileAtomic(path, std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(json.data()), json.size()));
+}

@@ -90,3 +90,20 @@ TEST_CASE("sanitize keeps accents and apostrophes, drops quotes") {
 TEST_CASE("sanitize drops control characters") {
     CHECK(sanitizeArg(std::string("a\n\tb\x01") + "c") == "abc");
 }
+
+TEST_CASE("cover and video paths are read, spaces included") {
+    const char* argv[] = {"self", "--protocol", "1", "--rom", "r", "--return", "y",
+        "--cover", "sdmc:/a", "b.png", "--video", "sdmc:/v.json"};
+    auto a = parseArgs(12, argv);
+    REQUIRE(a);
+    CHECK(a->cover == "sdmc:/a b.png");
+    CHECK(a->video == "sdmc:/v.json");
+}
+
+TEST_CASE("cover and video default to empty") {
+    const char* argv[] = {"self", "--protocol", "1", "--rom", "r", "--return", "y"};
+    auto a = parseArgs(7, argv);
+    REQUIRE(a);
+    CHECK(a->cover.empty());
+    CHECK(a->video.empty());
+}
