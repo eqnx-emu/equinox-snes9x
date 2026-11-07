@@ -32,8 +32,8 @@ struct VideoSettings {
     bool operator==(const VideoSettings&) const = default;
 };
 
-// A flat JSON object of string values. Unknown keys and values are ignored;
-// any syntax error yields empty prefs.
+// A JSON object. Unknown keys and values of any JSON type are ignored, so files
+// from newer versions still load; any syntax error yields empty prefs.
 VideoPrefs parsePrefs(std::string_view json);
 std::string serializePrefs(const VideoPrefs& prefs);
 

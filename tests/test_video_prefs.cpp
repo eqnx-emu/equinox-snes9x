@@ -19,8 +19,40 @@ TEST_CASE("unknown values and keys are absent") {
 
 TEST_CASE("broken input gives empty prefs") {
     for (auto s : {"", "{", "[]", "null", "{\"size\":", "\xEF\xBB\xBF{\"size\":\"full\"", "garbage",
-             "{\"size\":\"full\"} x", "{\"size\":\"full\",}", "{\"a\":{}}"})
+             "{\"size\":\"full\"} x", "{\"size\":\"full\",}"})
         CHECK(parsePrefs(s).empty());
+}
+
+TEST_CASE("broken nested values and escapes give empty prefs") {
+    for (auto s : {R"({"size":"full","a":{"b":1,}})", R"({"size":"full","a":[1,]})",
+             R"({"size":"full","a":[1})", R"({"size":"full","a":{"b"}})", R"({"size":"full","a":{1:2}})",
+             R"({"size":"full","a":"\x"})", R"({"size":"full","a":"\u12"})",
+             R"({"size":"full","a":"\u12g4"})", R"({"size":"full","a":tru})",
+             R"({"size":"full","a":[[[)", R"({"size":"full","a":}"})"})
+        CHECK(parsePrefs(s).empty());
+}
+
+TEST_CASE("nested values of unknown keys are skipped") {
+    CHECK(parsePrefs(R"({"x":{"a":[1,"}"]},"size":"full"})").size == Size::Full);
+    CHECK(parsePrefs(R"({"x":[1,2,{"y":null}],"smooth":"soft"})").smooth == Smooth::Soft);
+    CHECK(parsePrefs(R"({"x":{},"y":[],"z":[[{"w":"]"}]],"filter":"scanlines"})").filter == Filter::Scanlines);
+    CHECK(parsePrefs(R"({"size":{"v":"full"},"border":"tv"})").border == Border::Tv);
+    CHECK(!parsePrefs(R"({"size":{"v":"full"},"border":"tv"})").size);
+}
+
+TEST_CASE("nesting is bounded") {
+    auto nested = [](int depth) {
+        return "{\"x\":" + std::string(depth, '[') + std::string(depth, ']') + ",\"size\":\"full\"}";
+    };
+    CHECK(parsePrefs(nested(10)).size == Size::Full);
+    CHECK(parsePrefs(nested(100000)).empty());
+}
+
+TEST_CASE("every JSON escape is read") {
+    CHECK(parsePrefs(R"({"note":"a\/b\n\b\f\r\t","border":"tv"})").border == Border::Tv);
+    CHECK(parsePrefs("{\"size\":\"\\u0066ull\"}").size == Size::Full);
+    CHECK(parsePrefs("{\"n\":\"\\u00e9\\u20AC\\ud83d\\ude00\",\"size\":\"4:3\"}").size == Size::Aspect43);
+    CHECK(!parsePrefs(R"({"size":"full\n"})").size);
 }
 
 TEST_CASE("BOM and whitespace are accepted") {
