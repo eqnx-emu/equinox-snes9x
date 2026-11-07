@@ -27,6 +27,7 @@
 #include "rom.hpp"
 #include "strings.hpp"
 #include "video_art.hpp"
+#include "video_menu.hpp"
 #include "video_prefs.hpp"
 
 #ifdef __SWITCH__
@@ -211,6 +212,7 @@ static void showError(Video& video, Input& input, MenuView& view, Str msg, bool 
         const auto edges = input.poll();
         if (edges.confirm || (!withBack && edges.back)) return;
         if (!withBack && SDL_GetTicks() - start > 8000) return;
+        view.setScreenHeight(video.screenH());
         view.drawError(tr(g_lang, msg), withBack, g_lang);
         video.flip();
     }
@@ -234,6 +236,18 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
     const std::string title = args.title.empty() ? romStem(args.rom) : args.title;
     Menu menu;
     bool running = true;
+
+    // The game file keeps only what differs from the global default.
+    const VideoPrefs globalPrefs = loadPrefs(args.video);  // empty without --video
+    const VideoSettings globalSettings = resolve(globalPrefs, {});
+    const std::string videoFile = videoPrefsPath(args.saves, args.rom);
+    VideoSettings videoSettings;
+    auto applyVideo = [&](const VideoSettings& s) {
+        videoSettings = s;
+        video.setSettings(s);
+    };
+    applyVideo(resolve(globalPrefs, loadPrefs(videoFile)));
+    std::optional<VideoMenu> videoMenu;  // open over the paused game, from the pause menu
 
     auto openMenu = [&] {
         menu.setHasState(fileExists(stateFile));
@@ -267,8 +281,35 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
         }
     };
 
+    auto videoMenuInput = [&](const Input::Edges& edges) {
+        VideoMenu& vm = *videoMenu;
+        if (edges.up) vm.moveCursor(-1);
+        if (edges.down) vm.moveCursor(1);
+        VideoAction act = VideoAction::None;
+        if (edges.confirm) act = vm.confirm();
+        else if (edges.back) act = vm.back();
+        else if (edges.left) act = vm.change(-1);
+        else if (edges.right) act = vm.change(1);
+        switch (act) {
+            case VideoAction::Changed: applyVideo(vm.settings()); break;
+            case VideoAction::UseDefault:
+                vm.reset(globalSettings);
+                applyVideo(vm.settings());
+                break;
+            case VideoAction::Close:
+                if (!savePrefs(videoFile, overridesFor(globalSettings, vm.settings()))) {
+                    std::fprintf(stderr, "could not save %s\n", videoFile.c_str());
+                    g_toasts.show(tr(g_lang, Str::VideoSaveFailed));
+                }
+                videoMenu.reset();  // back to the pause menu
+                break;
+            case VideoAction::None: break;
+        }
+    };
+
     while (running) {
         followDock(window, video, docked);
+        view.setScreenHeight(video.screenH());
         bool touched = false;
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -282,6 +323,8 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
 
         if (!menu.isOpen()) {
             if (edges.menuCombo || touched || padLost) openMenu();
+        } else if (videoMenu) {
+            videoMenuInput(edges);
         } else {
             MenuAction act = MenuAction::None;
             if (edges.up) menu.up();
@@ -292,7 +335,7 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
                 case MenuAction::Close: closeMenu(); break;
                 case MenuAction::SaveState: saveState(); break;
                 case MenuAction::LoadState: loadState(); break;
-                case MenuAction::OpenVideo: break;  // wired in Task 7
+                case MenuAction::OpenVideo: videoMenu.emplace(videoSettings); break;
                 case MenuAction::Exit:
                     g_sram.flush();
                     if (!scheduleReturn(args))
@@ -303,7 +346,10 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
             }
         }
 
-        if (menu.isOpen()) {
+        if (videoMenu) {
+            video.drawGame();
+            view.drawVideoMenu(*videoMenu, g_lang);
+        } else if (menu.isOpen()) {
             video.drawGame();
             view.drawMenu(menu, title, g_lang);
         } else {
@@ -380,8 +426,6 @@ static void run(const std::optional<LaunchArgs>& args, bool showFps, SDL_Window*
                     core.onAudio = [&](const int16_t* lr, size_t frames) { audio.push(lr, frames); };
                 else
                     std::fprintf(stderr, "audio init failed; running silent\n");
-                video.setSettings(resolve(loadPrefs(args->video),
-                                          loadPrefs(videoPrefsPath(args->saves, args->rom))));
                 // Decoded and blurred once, before the first frame. Out of memory means no
                 // cover, which falls back to the Equinox border.
                 if (!args->cover.empty()) {

@@ -100,12 +100,14 @@ int16_t Input::rawState(unsigned port, unsigned id) const {
 }
 
 Input::Edges Input::poll() {
-    bool up = false, down = false, a = false, b = false, combo = false;
+    bool up = false, down = false, left = false, right = false, a = false, b = false, combo = false;
     for (auto* j : pads_) {
         if (!j) continue;
-        const int ay = SDL_JoystickGetAxis(j, 1);
+        const int ax = SDL_JoystickGetAxis(j, 0), ay = SDL_JoystickGetAxis(j, 1);
         up |= SDL_JoystickGetButton(j, kUp) || ay < -kDeadzone;
         down |= SDL_JoystickGetButton(j, kDown) || ay > kDeadzone;
+        left |= SDL_JoystickGetButton(j, kLeft) || ax < -kDeadzone;
+        right |= SDL_JoystickGetButton(j, kRight) || ax > kDeadzone;
         a |= SDL_JoystickGetButton(j, kA) != 0;
         b |= SDL_JoystickGetButton(j, kB) != 0;
         combo |= SDL_JoystickGetButton(j, kZL) && SDL_JoystickGetButton(j, kZR);
@@ -113,11 +115,15 @@ Input::Edges Input::poll() {
     Edges e;
     e.up = up && !prevUp_;
     e.down = down && !prevDown_;
+    e.left = left && !prevLeft_;
+    e.right = right && !prevRight_;
     e.confirm = a && !prevA_;
     e.back = b && !prevB_;
     e.menuCombo = combo && !prevCombo_;
     prevUp_ = up;
     prevDown_ = down;
+    prevLeft_ = left;
+    prevRight_ = right;
     prevA_ = a;
     prevB_ = b;
     prevCombo_ = combo;

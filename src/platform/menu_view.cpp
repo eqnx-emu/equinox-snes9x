@@ -77,14 +77,31 @@ void MenuView::shutdown() {
     fontData_.clear();
 }
 
+void MenuView::setScreenHeight(int h) {
+    const float s = h > 0 ? h / float(kScreenH) : 1.0f;
+    if (s == scale_) return;
+    scale_ = s;
+    // Text textures were rendered for the old size.
+    for (auto& [k, c] : cache_)
+        if (c.tex) SDL_DestroyTexture(c.tex);
+    cache_.clear();
+}
+
+MenuView::Scaled::Scaled(const MenuView& v) : r_(v.r_) { SDL_RenderSetScale(r_, v.scale_, v.scale_); }
+MenuView::Scaled::~Scaled() { SDL_RenderSetScale(r_, 1.0f, 1.0f); }
+
+int MenuView::screenPx(int px) const { return static_cast<int>(std::lround(px * scale_)); }
+
+// Fonts open at the screen's pixel size, so docked text is rendered at 1080p, not enlarged.
 TTF_Font* MenuView::font(int px) {
     if (fontData_.empty()) return nullptr;
-    auto it = fonts_.find(px);
+    const int sp = screenPx(px);
+    auto it = fonts_.find(sp);
     if (it != fonts_.end()) return it->second;
     SDL_RWops* rw = SDL_RWFromConstMem(fontData_.data(), static_cast<int>(fontData_.size()));
-    TTF_Font* f = rw ? TTF_OpenFontRW(rw, 1, px) : nullptr;
-    if (!f) std::fprintf(stderr, "TTF_OpenFontRW(%d) failed: %s\n", px, TTF_GetError());
-    fonts_[px] = f;
+    TTF_Font* f = rw ? TTF_OpenFontRW(rw, 1, sp) : nullptr;
+    if (!f) std::fprintf(stderr, "TTF_OpenFontRW(%d) failed: %s\n", sp, TTF_GetError());
+    fonts_[sp] = f;
     return f;
 }
 
@@ -117,7 +134,7 @@ const MenuView::Cached* MenuView::text(const std::string& s, int px, SDL_Color c
 int MenuView::textWidth(const std::string& s, int px) {
     int w = 0, h = 0;
     if (TTF_Font* f = font(px)) TTF_SizeUTF8(f, s.c_str(), &w, &h);
-    return w;
+    return static_cast<int>(std::ceil(w / scale_));
 }
 
 std::string MenuView::fit(const std::string& s, int px, int maxW) {
@@ -135,11 +152,14 @@ std::string MenuView::fit(const std::string& s, int px, int maxW) {
 void MenuView::drawText(const std::string& s, int px, SDL_Color c, int x, int y, int align) {
     const Cached* t = text(s, px, c);
     if (!t) return;
-    int dx = x;
-    if (align == 1) dx = x - t->w / 2;
-    else if (align == 2) dx = x - t->w;
-    const SDL_Rect dst{dx, y, t->w, t->h};
-    SDL_RenderCopy(r_, t->tex, nullptr, &dst);
+    // The texture is in screen pixels: place it on whole screen pixels so it copies 1:1.
+    const float w = t->w / scale_, h = t->h / scale_;
+    float dx = static_cast<float>(x);
+    if (align == 1) dx -= w / 2;
+    else if (align == 2) dx -= w;
+    const auto snap = [&](float v) { return std::round(v * scale_) / scale_; };
+    const SDL_FRect dst{snap(dx), snap(static_cast<float>(y)), w, h};
+    SDL_RenderCopyF(r_, t->tex, nullptr, &dst);
 }
 
 // Rounded rectangle: a middle band plus one inset scanline per corner row.
@@ -165,6 +185,7 @@ void MenuView::badgeA(int cx, int cy, int r) {
 }
 
 void MenuView::drawMenu(const Menu& menu, const std::string& gameTitle, Lang lang) {
+    const Scaled scaled(*this);
     SDL_SetRenderDrawBlendMode(r_, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(r_, 0, 0, 0, 170);
     const SDL_Rect all{0, 0, kScreenW, kScreenH};
@@ -187,7 +208,42 @@ void MenuView::drawMenu(const Menu& menu, const std::string& gameTitle, Lang lan
     }
 }
 
+void MenuView::drawVideoMenu(const VideoMenu& menu, Lang lang) {
+    const Scaled scaled(*this);
+    constexpr int kTitleH = 64, kRows = 6, kValuePx = 28;
+    const int panelH = kPad * 2 + kTitleH + kRows * kRow;
+    const int px = kPad, py = (kScreenH - panelH) / 2;
+    fillRound(px, py, kPanelW, panelH, 12, kPanel);
+    drawText(tr(lang, Str::VideoTitle), 26, kTitle, px + kPad, py + kPad);
+
+    const VideoSettings& s = menu.settings();
+    const Str values[4] = {label(s.size), label(s.smooth), label(s.filter), label(s.border)};
+    const Str names[kRows] = {Str::Size, Str::Smoothing, Str::Filter, Str::Border, Str::UseDefault, Str::Back};
+    const int right = px + kPanelW - kPad - 8;
+    int y = py + kPad + kTitleH;
+    for (int i = 0; i < kRows; ++i, y += kRow) {
+        const auto row = static_cast<VideoRow>(i);
+        const bool enabled = menu.rowEnabled(row);
+        const bool sel = menu.cursor() == row;
+        if (sel) fillRound(px + 12, y, kPanelW - 24, kRow - 8, 10, kAmberSoft);
+        drawText(tr(lang, names[i]), 30, enabled ? (sel ? kAmber : kText) : kMuted, px + kPad + 8, y + 9);
+        if (i >= 4) continue;  // Use default, Back: buttons, no value
+        if (!enabled) {
+            drawText("—", kValuePx, kMuted, right, y + 11, 2);
+            continue;
+        }
+        // "‹ value ›"; the arrows light up on the current row.
+        const SDL_Color arrow = sel ? kAmber : kMuted;
+        const std::string value = tr(lang, values[i]);
+        const int valueRight = right - 26;
+        drawText("›", kValuePx, arrow, right, y + 11, 2);
+        drawText(value, kValuePx, kText, valueRight, y + 11, 2);
+        drawText("‹", kValuePx, arrow, valueRight - textWidth(value, kValuePx) - 14, y + 11, 2);
+    }
+}
+
 void MenuView::drawToast(const std::string& msg) {
+    const Scaled scaled(*this);
     const int w = std::max(240, textWidth(msg, 28) + 64), h = 56;
     const int y = kScreenH - h - 40;
     fillRound((kScreenW - w) / 2, y, w, h, 12, SDL_Color{0x17, 0x1c, 0x28, 235});
@@ -195,6 +251,7 @@ void MenuView::drawToast(const std::string& msg) {
 }
 
 void MenuView::drawError(const std::string& message, bool withBack, Lang lang) {
+    const Scaled scaled(*this);
     SDL_SetRenderDrawColor(r_, 0x0d, 0x10, 0x18, 255);
     SDL_RenderClear(r_);
     const int w = 900, h = withBack ? 260 : 190;
