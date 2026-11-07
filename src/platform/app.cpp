@@ -1,11 +1,38 @@
-// Minimal Switch entry point: paints the screen #0d1018 for two seconds and exits.
+// Switch entry point. Without a valid launch line (opened from hbmenu) it shows a
+// message for four seconds and exits; the real error screen arrives with the UI.
 #include <SDL2/SDL.h>
+
+#include <cstdio>
+
+#include "args.hpp"
+#include "platform/relaunch.hpp"
 
 #ifdef __SWITCH__
 #include <switch.h>
 #endif
 
-int main(int, char**) {
+static void showOpenFromEquinoxMessage() {
+    const char* msg = "Abra este emulador pelo Equinox";
+#ifdef __SWITCH__
+    consoleInit(nullptr);
+    std::printf("\n\n  %s\n", msg);
+    consoleUpdate(nullptr);
+    svcSleepThread(4'000'000'000LL);
+    consoleExit(nullptr);
+#else
+    std::fprintf(stderr, "%s\n", msg);
+    SDL_Delay(4000);
+#endif
+}
+
+int main(int argc, char** argv) {
+    const auto args = parseArgs(argc, argv);
+    if (!args) {
+        showOpenFromEquinoxMessage();
+        return 0;
+    }
+    scheduleReturn(*args);
+
     if (SDL_Init(SDL_INIT_VIDEO) != 0) return 1;
 
     SDL_Window* window = SDL_CreateWindow("Equinox SNES", SDL_WINDOWPOS_UNDEFINED,
