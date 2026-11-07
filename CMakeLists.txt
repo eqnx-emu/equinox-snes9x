@@ -23,10 +23,14 @@ file(GLOB_RECURSE EQX_ALL_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/
 set(EQX_LOGIC_SRC ${EQX_ALL_SRC})
 list(FILTER EQX_LOGIC_SRC EXCLUDE REGEX "/src/platform/")
 
+# Vendored miniz (MIT): memory APIs only, and no zlib-name clashes with portlibs zlib.
+add_compile_definitions(MINIZ_NO_STDIO MINIZ_NO_TIME MINIZ_NO_ZLIB_COMPATIBLE_NAMES)
+set(EQX_MINIZ_SRC ${CMAKE_CURRENT_SOURCE_DIR}/extern/miniz/miniz.c)
+
 if (EQX_HOST_TESTS)
     enable_testing()
     file(GLOB EQX_TEST_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tests/*.cpp)
-    add_executable(eqx_tests ${EQX_LOGIC_SRC} ${EQX_TEST_SRC})
+    add_executable(eqx_tests ${EQX_LOGIC_SRC} ${EQX_TEST_SRC} ${EQX_MINIZ_SRC})
     target_include_directories(eqx_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/extern)
@@ -38,10 +42,11 @@ if (NINTENDO_SWITCH)
 
     set(PORTLIBS_SWITCH /opt/devkitpro/portlibs/switch)
 
-    add_executable(equinox-snes9x ${EQX_ALL_SRC})
+    add_executable(equinox-snes9x ${EQX_ALL_SRC} ${EQX_MINIZ_SRC})
     target_link_directories(equinox-snes9x PRIVATE ${PORTLIBS_SWITCH}/lib)
     target_include_directories(equinox-snes9x PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/extern
         ${PORTLIBS_SWITCH}/include
         ${PORTLIBS_SWITCH}/include/SDL2
         ${CMAKE_CURRENT_SOURCE_DIR}/extern/snes9x/libretro
