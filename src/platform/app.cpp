@@ -46,7 +46,7 @@ public:
     void attach(Core* core, std::string path) {
         core_ = core;
         path_ = std::move(path);
-        if (auto saved = readFile(path_)) {
+        if (auto saved = readFileWithRecovery(path_)) {
             auto ram = core_->saveRam();
             const size_t n = std::min(ram.size(), saved->size());
             if (n) std::memcpy(ram.data(), saved->data(), n);

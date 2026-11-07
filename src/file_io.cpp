@@ -44,12 +44,28 @@ bool writeFileAtomic(const std::string& path, std::span<const uint8_t> data) {
         fs::rename(tmp, target, ec);
         if (ec) {
             // Some filesystems (Switch FAT) refuse to rename over an existing file.
-            // Only fall back for regular files, never delete a directory.
+            // Only fall back for regular files. The old file is moved to <path>.bak,
+            // never deleted, until the new one is in place; on failure it is restored.
             std::error_code ec2;
             if (fs::is_regular_file(target, ec2)) {
-                fs::remove(target, ec2);
+                fs::path bak = target;
+                bak += ".bak";
+                fs::remove(bak, ec2);
+                fs::rename(target, bak, ec2);
+                if (ec2) {
+                    fs::remove(tmp, ec2);  // target untouched
+                    return false;
+                }
                 ec.clear();
                 fs::rename(tmp, target, ec);
+                if (ec) {
+                    std::error_code ec3;
+                    fs::rename(bak, target, ec3);
+                    if (!ec3) fs::remove(tmp, ec3);  // restored; otherwise keep .tmp and .bak for recovery
+                    return false;
+                }
+                fs::remove(bak, ec2);
+                return true;
             }
         }
         if (ec) {
@@ -65,4 +81,10 @@ bool writeFileAtomic(const std::string& path, std::span<const uint8_t> data) {
         }
         return false;
     }
+}
+
+std::optional<std::vector<uint8_t>> readFileWithRecovery(const std::string& path) {
+    for (const char* suffix : {"", ".bak", ".tmp"})
+        if (auto d = readFile(path + suffix)) return d;
+    return std::nullopt;
 }

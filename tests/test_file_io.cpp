@@ -56,3 +56,24 @@ TEST_CASE("failed write keeps old file") {
     CHECK(fs::exists(target / "keep"));
     CHECK_FALSE(fs::exists(u8(target) + ".tmp"));
 }
+
+// Portable: <target>.tmp is a directory, so the temp file cannot be opened; the write
+// fails and the existing target keeps its old bytes.
+TEST_CASE("failed write leaves existing target content") {
+    auto t = dir() / "keepme.srm";
+    REQUIRE(writeFileAtomic(u8(t), std::vector<uint8_t>{1, 2, 3}));
+    fs::create_directories(u8(t) + ".tmp");
+    CHECK_FALSE(writeFileAtomic(u8(t), std::vector<uint8_t>{9, 9}));
+    CHECK(readFile(u8(t)) == std::vector<uint8_t>{1, 2, 3});
+}
+
+TEST_CASE("recovery read falls back to bak then tmp") {
+    auto t = u8(dir() / "rec.srm");
+    CHECK_FALSE(readFileWithRecovery(t).has_value());
+    { std::ofstream f(t + ".tmp", std::ios::binary); f << "T"; }
+    CHECK(readFileWithRecovery(t) == std::vector<uint8_t>{'T'});
+    { std::ofstream f(t + ".bak", std::ios::binary); f << "B"; }
+    CHECK(readFileWithRecovery(t) == std::vector<uint8_t>{'B'});
+    { std::ofstream f(t, std::ios::binary); f << "X"; }
+    CHECK(readFileWithRecovery(t) == std::vector<uint8_t>{'X'});
+}
