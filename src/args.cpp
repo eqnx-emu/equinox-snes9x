@@ -16,17 +16,27 @@ std::string sanitizeArg(std::string_view s) {
 
 std::optional<LaunchArgs> parseArgs(int argc, const char* const* argv) {
     LaunchArgs a;
-    for (int i = 1; i + 1 < argc; i += 2) {
-        const char* key = argv[i];
-        const char* value = argv[i + 1];
-        if (!std::strcmp(key, "--protocol")) a.protocol = std::atoi(value);
+    // A value runs until the next "--" flag. Launchers that don't keep quotes (hbmenu's
+    // netloader) split "Super Mario World.zip" into several argv entries; this joins them back.
+    auto isFlag = [](const char* t) { return t[0] == '-' && t[1] == '-'; };
+    int i = 1;
+    while (i < argc) {
+        const char* key = argv[i++];
+        std::string value;
+        bool any = false;
+        while (i < argc && !isFlag(argv[i])) {
+            if (any) value.push_back(' ');
+            value += argv[i++];
+            any = true;
+        }
+        if (!any) continue;  // flag without a value
+        if (!std::strcmp(key, "--protocol")) a.protocol = std::atoi(value.c_str());
         else if (!std::strcmp(key, "--rom")) a.rom = value;
         else if (!std::strcmp(key, "--title")) a.title = value;
         else if (!std::strcmp(key, "--saves")) a.saves = value;
         else if (!std::strcmp(key, "--states")) a.states = value;
         else if (!std::strcmp(key, "--return")) a.returnPath = value;
         else if (!std::strcmp(key, "--resume")) a.resumeToken = value;
-        else --i;  // unknown token: resync one by one
     }
     if (a.protocol != kProtocolVersion || a.rom.empty() || a.returnPath.empty()) return std::nullopt;
     return a;

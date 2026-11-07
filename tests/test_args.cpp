@@ -48,6 +48,26 @@ TEST_CASE("a trailing flag without a value is ignored") {
     CHECK(a->resumeToken.empty());
 }
 
+TEST_CASE("values split on spaces by the launcher are joined back") {
+    const char* argv[] = {"self", "--protocol", "1", "--rom", "sdmc:/equinox/roms/snes/Super",
+        "Mario", "World.zip", "--title", "Super", "Mario", "World", "--return",
+        "sdmc:/switch/Equinox.nro", "--resume", "t", "--show-fps"};
+    auto a = parseArgs(16, argv);
+    REQUIRE(a);
+    CHECK(a->rom == "sdmc:/equinox/roms/snes/Super Mario World.zip");
+    CHECK(a->title == "Super Mario World");
+    CHECK(a->returnPath == "sdmc:/switch/Equinox.nro");
+    CHECK(a->resumeToken == "t");
+}
+
+TEST_CASE("unknown flags and their values are skipped") {
+    const char* argv[] = {"self", "--show-fps", "--future", "x", "--protocol", "1", "--rom", "r",
+        "--return", "y"};
+    auto a = parseArgs(10, argv);
+    REQUIRE(a);
+    CHECK(a->rom == "r");
+}
+
 TEST_CASE("return command quotes the path") {
     LaunchArgs a;
     a.returnPath = "sdmc:/switch/Equinox App.nro";
