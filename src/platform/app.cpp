@@ -20,10 +20,13 @@
 #include "platform/audio.hpp"
 #include "platform/input.hpp"
 #include "platform/menu_view.hpp"
+#include "platform/png_load.hpp"
 #include "platform/relaunch.hpp"
 #include "platform/video.hpp"
 #include "rom.hpp"
 #include "strings.hpp"
+#include "video_art.hpp"
+#include "video_prefs.hpp"
 
 #ifdef __SWITCH__
 #include <switch.h>
@@ -153,6 +156,35 @@ static void appletHookFn(AppletHookType type, void*) {
 #endif
 
 
+// Docked, the runner renders 1920x1080; handheld, 1280x720.
+static bool isDocked() {
+#ifdef __SWITCH__
+    return appletGetOperationMode() == AppletOperationMode_Console;
+#else
+    return false;
+#endif
+}
+
+static void screenSize(bool docked, int& w, int& h) {
+    w = docked ? 1920 : 1280;
+    h = docked ? 1080 : 720;
+}
+
+// Called once per frame: follows the console into and out of the dock.
+static void followDock(SDL_Window* window, Video& video, bool& docked) {
+    const bool now = isDocked();
+    if (now == docked) return;
+    docked = now;
+    int w = 0, h = 0;
+    screenSize(docked, w, h);
+    SDL_SetWindowSize(window, w, h);
+    video.setScreen(w, h);
+    int ow = 0, oh = 0;
+    SDL_GetRendererOutputSize(video.renderer(), &ow, &oh);
+    std::fprintf(stderr, "%s: screen %dx%d, renderer output %dx%d\n",
+                 docked ? "docked" : "handheld", w, h, ow, oh);
+}
+
 static bool fileExists(const std::string& path) {
     if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
         std::fclose(f);
@@ -191,8 +223,8 @@ static Str romErrorText(RomError e) {
 }
 
 // The menu, savestates and the frame loop.
-static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& audio, Core& core,
-                     MenuView& view) {
+static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Video& video,
+                     Input& input, Audio& audio, Core& core, MenuView& view) {
     const std::string stateFile = statePath(args.states, args.rom);
     const std::string title = args.title.empty() ? romStem(args.rom) : args.title;
     Menu menu;
@@ -231,6 +263,7 @@ static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& 
     };
 
     while (running) {
+        followDock(window, video, docked);
         bool touched = false;
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -304,8 +337,11 @@ public:
 };
 
 static void run(const std::optional<LaunchArgs>& args, bool showFps, SDL_Window*& window) {
-    window = SDL_CreateWindow("Equinox SNES", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1280,
-                              720, SDL_WINDOW_SHOWN);
+    const bool docked = isDocked();
+    int screenW = 0, screenH = 0;
+    screenSize(docked, screenW, screenH);
+    window = SDL_CreateWindow("Equinox SNES", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenW,
+                              screenH, SDL_WINDOW_SHOWN);
     Video video;
     Input input;
     Audio audio;
@@ -339,9 +375,14 @@ static void run(const std::optional<LaunchArgs>& args, bool showFps, SDL_Window*
                     core.onAudio = [&](const int16_t* lr, size_t frames) { audio.push(lr, frames); };
                 else
                     std::fprintf(stderr, "audio init failed; running silent\n");
+                video.setSettings(resolve(loadPrefs(args->video),
+                                          loadPrefs(videoPrefsPath(args->saves, args->rom))));
+                // Decoded and blurred once, before the first frame.
+                if (!args->cover.empty())
+                    video.setCover(blurCover(loadPng(args->cover), screenW / 8, screenH / 8));
                 {
                     SramSession session(core, srmPath(args->saves, args->rom));
-                    gameLoop(*args, video, input, audio, core, view);
+                    gameLoop(*args, window, docked, video, input, audio, core, view);
                 }
                 audio.shutdown();
                 core.unload();

@@ -6,12 +6,25 @@
 #include <cstdint>
 #include <vector>
 
-// Streaming RGB565 texture, drawn centred in a 1280x720 window at 4:3 (960x720)
-// with linear filtering. Optional FPS counter.
+#include "video_art.hpp"
+#include "video_layout.hpp"
+#include "video_prefs.hpp"
+
+// Streaming RGB565 game texture drawn per the video settings: background, game,
+// scanlines. Every texture is rebuilt only when what it depends on changes (source
+// size, screen size, settings), never per frame. Optional FPS counter.
 class Video {
 public:
+    // The screen starts at the window's size.
     bool init(SDL_Window* window, bool showFps);
     ~Video();
+
+    void setScreen(int w, int h);
+    void setSettings(const VideoSettings& settings);
+    // Takes an already blurred cover; an empty image removes it.
+    void setCover(Image blurred);
+    bool hasCover() const { return cover_ != nullptr; }
+    int screenH() const { return screenH_; }
 
     void upload(const void* px, unsigned w, unsigned h, size_t pitch);
     void present();  // draws the last frame (and the counter) and flips on vsync
@@ -21,11 +34,31 @@ public:
     SDL_Renderer* renderer() const { return renderer_; }
 
 private:
+    void drawBackground(const Rect& game);
+    void drawFrame(const Rect& game);
+    void drawScanlines(const Rect& game);
+    bool tvFrameShown() const;
+    void ensureTv(const Rect& game);
     void drawFps();
+    SDL_Texture* makeTexture(const Image& img, SDL_ScaleMode scale, SDL_BlendMode blend);
+    void applyGameScaleMode();
 
     SDL_Renderer* renderer_ = nullptr;
-    SDL_Texture* tex_ = nullptr;
+    int screenW_ = 1280, screenH_ = 720;
+    VideoSettings settings_;
+
+    SDL_Texture* tex_ = nullptr;  // the game frame
     unsigned w_ = 0, h_ = 0;
+    SDL_Texture* sharp_ = nullptr;  // Sharp: the frame enlarged k times with nearest
+    unsigned sharpW_ = 0, sharpH_ = 0;
+    SDL_Texture* scan_ = nullptr;
+    unsigned scanRows_ = 0;
+    SDL_Texture* backdrop_ = nullptr;  // Equinox border, for the current screen
+    SDL_Texture* cover_ = nullptr;
+    SDL_Texture* tvBack_ = nullptr;   // room, bezel and rim; full screen
+    SDL_Texture* tvFront_ = nullptr;  // rounded screen corners and glare; game sized
+    Rect tvRect_{0, 0, 0, 0};
+
     bool showFps_ = false;
     bool native565_ = true;
     std::vector<uint32_t> lut_;  // RGB565 to ARGB8888 when the renderer lacks RGB565
