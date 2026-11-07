@@ -85,3 +85,16 @@ read from `kProtocolVersion` in `src/args.hpp`):
 | `asset`    | Name of the release asset to download. |
 | `size`     | Size of the asset in bytes. |
 | `sha256`   | Lowercase hex SHA-256 of the asset. |
+
+## Testing on a Switch with nxlink
+
+    nxlink -s -p equinox-snes9x.nro build/docker/equinox-snes9x.nro -- \
+        --protocol 1 --rom "sdmc:/equinox/roms/snes/Game Name.zip" --title "Game Name" \
+        --saves sdmc:/equinox/saves/snes --states sdmc:/equinox/states/snes \
+        --return sdmc:/switch/Equinox.nro --resume t --show-fps
+
+Under nxlink the runner sends stdout/stderr to the `-s` server. hbmenu's netloader
+drops quotes, so the runner joins a value's words back up to the next `--` flag.
+Known issue: if the `-s` server is still listening when you choose Exit, the next
+program crashes back to HOME. Stop nxlink first, or test exits without `-s`.
+Users never hit this: outside nxlink the runner opens no socket.
