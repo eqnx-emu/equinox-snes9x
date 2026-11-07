@@ -15,6 +15,10 @@ public:
 
     void upload(const void* px, unsigned w, unsigned h, size_t pitch);
     void present();  // draws the last frame (and the counter) and flips on vsync
+    // present() split in two, so the menu can draw over the game frame.
+    void drawGame();
+    void flip();
+    SDL_Renderer* renderer() const { return renderer_; }
 
 private:
     void drawFps();

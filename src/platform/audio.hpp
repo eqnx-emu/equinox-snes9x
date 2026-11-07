@@ -18,6 +18,7 @@ public:
     bool init(double coreRate, double coreFps);
     void push(const int16_t* lr, size_t frames);
     void shutdown();
+    void pause(bool paused);  // device stops pulling: silence while the menu is open
 
 private:
     static void callback(void* user, Uint8* out, int len);

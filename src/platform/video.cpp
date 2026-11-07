@@ -102,7 +102,7 @@ void Video::drawFps() {
     }
 }
 
-void Video::present() {
+void Video::drawGame() {
     if (!renderer_) return;
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
     SDL_RenderClear(renderer_);
@@ -111,5 +111,13 @@ void Video::present() {
         SDL_RenderCopy(renderer_, tex_, nullptr, &dst);
     }
     if (showFps_) drawFps();
-    SDL_RenderPresent(renderer_);
+}
+
+void Video::flip() {
+    if (renderer_) SDL_RenderPresent(renderer_);
+}
+
+void Video::present() {
+    drawGame();
+    flip();
 }

@@ -48,6 +48,10 @@ void Audio::push(const int16_t* lr, size_t frames) {
     if (ring_) ring_->write(lr, frames);
 }
 
+void Audio::pause(bool paused) {
+    if (dev_) SDL_PauseAudioDevice(dev_, paused ? 1 : 0);
+}
+
 void Audio::callback(void* user, Uint8* out, int len) {
     static_cast<Audio*>(user)->fill(out, len);
 }

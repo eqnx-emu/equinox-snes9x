@@ -13,12 +13,19 @@ public:
     void shutdown();
     void handleEvent(const SDL_Event& e);                  // hot-plug
     int16_t state(unsigned port, unsigned retroId) const;  // RETRO_DEVICE_ID_JOYPAD_*
-    // True once Plus+Minus have been held on any pad for ms.
-    bool comboHeld(Uint32 ms);
+    // Buttons newly pressed since the previous poll(); call once per frame.
+    struct Edges {
+        bool up = false, down = false, confirm = false, back = false;  // D-pad/stick, A, B
+        bool menuCombo = false;                                         // ZL+ZR together
+    };
+    Edges poll();
+    // True once if player 1's pad was unplugged since the last call.
+    bool takePadLost();
 
 private:
     void rebuild();
     SDL_Joystick* pads_[2] = {nullptr, nullptr};
     SDL_Joystick* all_[8] = {};
-    Uint32 comboSince_ = 0;
+    bool prevUp_ = false, prevDown_ = false, prevA_ = false, prevB_ = false, prevCombo_ = false;
+    bool padLost_ = false;
 };

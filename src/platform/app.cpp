@@ -1,5 +1,4 @@
-// Switch entry point. Without a valid launch line (opened from hbmenu) it shows a
-// message for four seconds and exits; the real error screen arrives with the UI.
+// Switch entry point: SDL window, error screens, the main loop and the in-game menu.
 #include <SDL2/SDL.h>
 
 #include <algorithm>
@@ -12,30 +11,46 @@
 #include "args.hpp"
 #include "core.hpp"
 #include "file_io.hpp"
+#include "menu.hpp"
 #include "paths.hpp"
 #include "platform/audio.hpp"
 #include "platform/input.hpp"
+#include "platform/menu_view.hpp"
+#include "platform/relaunch.hpp"
 #include "platform/video.hpp"
 #include "rom.hpp"
-#include "platform/relaunch.hpp"
+#include "strings.hpp"
 
 #ifdef __SWITCH__
 #include <switch.h>
 #endif
 
-static void showOpenFromEquinoxMessage() {
-    const char* msg = "Abra este emulador pelo Equinox";
-#ifdef __SWITCH__
-    consoleInit(nullptr);
-    std::printf("\n\n  %s\n", msg);
-    consoleUpdate(nullptr);
-    svcSleepThread(4'000'000'000LL);
-    consoleExit(nullptr);
-#else
-    std::fprintf(stderr, "%s\n", msg);
-    SDL_Delay(4000);
-#endif
-}
+// Bottom-of-screen message. Save failures are debounced: the SRAM saver retries every
+// 5 s, so the toast appears at most once per 10 s while failures continue.
+class Toasts {
+public:
+    void show(std::string text) {
+        text_ = std::move(text);
+        until_ = SDL_GetTicks() + 2000;
+    }
+    void saveFailed(Lang lang) {
+        const Uint32 now = SDL_GetTicks();
+        if (failShown_ && now - lastFail_ < 10000) return;
+        failShown_ = true;
+        lastFail_ = now;
+        show(tr(lang, Str::SaveFailed));
+    }
+    bool active() const { return SDL_GetTicks() < until_; }
+    const std::string& text() const { return text_; }
+
+private:
+    std::string text_;
+    Uint32 until_ = 0, lastFail_ = 0;
+    bool failShown_ = false;
+};
+
+static Toasts g_toasts;
+static Lang g_lang = Lang::EnUS;
 
 // Battery save (SRAM) persistence. Writes go through writeFileAtomic so a power cut
 // never leaves a half-written .srm. A write happens only when the content hash changed:
@@ -83,8 +98,8 @@ private:
         if (writeFileAtomic(path_, ram)) {
             lastHash_ = h;
         } else {
-            // The "Nao foi possivel salvar" toast arrives with the Task 7 UI; retried on the next trigger.
-            std::fprintf(stderr, "could not save %s\n", path_.c_str());
+            std::fprintf(stderr, "could not save %s\n", path_.c_str());  // retried on the next trigger
+            g_toasts.saveFailed(g_lang);
         }
     }
     Core* core_ = nullptr;
@@ -109,85 +124,199 @@ static void appletHookFn(AppletHookType type, void*) {
 }
 #endif
 
+
+static bool fileExists(const std::string& path) {
+    if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
+        std::fclose(f);
+        return true;
+    }
+    return false;
+}
+
+// Full-screen error. With a back button, A ends it and main returns, which opens
+// Equinox. Without one (nothing to return to) it closes by itself after 8 s or on A/B.
+static void showError(Video& video, Input& input, MenuView& view, Str msg, bool withBack) {
+    const Uint32 start = SDL_GetTicks();
+    for (;;) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT) return;
+            input.handleEvent(e);
+        }
+        const auto edges = input.poll();
+        if (edges.confirm || (!withBack && edges.back)) return;
+        if (!withBack && SDL_GetTicks() - start > 8000) return;
+        view.drawError(tr(g_lang, msg), withBack, g_lang);
+        video.flip();
+    }
+}
+
+static Str romErrorText(RomError e) {
+    switch (e) {
+        case RomError::NotFound: return Str::RomNotFound;
+        case RomError::Unreadable: return Str::RomUnreadable;
+        case RomError::NoRomInZip: return Str::NoRomInZip;
+        case RomError::Unsupported:
+        case RomError::TooBig: return Str::RomUnsupported;
+        default: return Str::RomUnreadable;
+    }
+}
+
+// The menu, savestates and the frame loop.
+static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& audio, Core& core,
+                     MenuView& view) {
+    const std::string stateFile = statePath(args.states, args.rom);
+    const std::string title = args.title.empty() ? romStem(args.rom) : args.title;
+    Menu menu;
+    bool running = true;
+
+    auto openMenu = [&] {
+        menu.setHasState(fileExists(stateFile));
+        menu.open();
+        audio.pause(true);
+    };
+    auto closeMenu = [&] {
+        menu.close();
+        audio.pause(false);
+        g_sram.flush();  // menu exit is one of the SRAM flush triggers
+    };
+    auto saveState = [&] {
+        const auto st = core.serialize();
+        if (!st.empty() && writeFileAtomic(stateFile, st)) {
+            menu.setHasState(true);
+            g_toasts.show(tr(g_lang, Str::StateSaved));
+        } else {
+            std::fprintf(stderr, "could not write state %s\n", stateFile.c_str());
+            g_toasts.saveFailed(g_lang);
+        }
+    };
+    auto loadState = [&] {
+        const auto st = readFile(stateFile);
+        if (st && core.unserialize(*st)) {
+            g_toasts.show(tr(g_lang, Str::StateLoaded));
+            closeMenu();
+        } else {
+            std::fprintf(stderr, "could not load state %s\n", stateFile.c_str());
+            g_toasts.show(tr(g_lang, Str::NoState));
+        }
+    };
+
+    while (running) {
+        bool touched = false;
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT) running = false;
+            if (e.type == SDL_APP_WILLENTERBACKGROUND || e.type == SDL_APP_TERMINATING) g_sram.flush();
+            if (e.type == SDL_FINGERDOWN) touched = true;
+            input.handleEvent(e);
+        }
+        const auto edges = input.poll();
+        const bool padLost = input.takePadLost();
+
+        if (!menu.isOpen()) {
+            if (edges.menuCombo || touched || padLost) openMenu();
+        } else {
+            MenuAction act = MenuAction::None;
+            if (edges.up) menu.up();
+            if (edges.down) menu.down();
+            if (edges.confirm) act = menu.confirm();
+            else if (edges.back) act = menu.back();
+            switch (act) {
+                case MenuAction::Close: closeMenu(); break;
+                case MenuAction::SaveState: saveState(); break;
+                case MenuAction::LoadState: loadState(); break;
+                case MenuAction::Exit:
+                    g_sram.flush();
+                    if (!scheduleReturn(args))
+                        std::fprintf(stderr, "scheduleReturn failed: loader cannot chain-load\n");
+                    running = false;
+                    break;
+                case MenuAction::None: break;
+            }
+        }
+
+        if (menu.isOpen()) {
+            video.drawGame();
+            view.drawMenu(menu, title, g_lang);
+        } else {
+            core.runFrame();
+            g_sram.tick();
+            video.drawGame();
+        }
+        if (g_toasts.active()) view.drawToast(g_toasts.text());
+        video.flip();  // vsync paces one frame per refresh
+    }
+    g_sram.flush();  // exit: before the scheduled return to Equinox fires
+}
+
 int main(int argc, char** argv) {
     const auto args = parseArgs(argc, argv);
-    if (!args) {
-        showOpenFromEquinoxMessage();
-        return 0;
-    }
-    scheduleReturn(*args);
+    // Once launched by Equinox, any exit (menu, error, HOME) reopens it.
+    if (args && !scheduleReturn(*args)) std::fprintf(stderr, "scheduleReturn failed at start\n");
 
     bool showFps = false;
     for (int i = 1; i < argc; ++i)
         if (!std::strcmp(argv[i], "--show-fps")) showFps = true;
 
-    auto fail = [](const char* what) {
-        std::fprintf(stderr, "%s\n", what);
-        return 0;  // the return to Equinox is already scheduled; Task 7 adds the error screen
-    };
-
-    auto loaded = loadRom(args->rom);
-    if (auto* err = std::get_if<RomError>(&loaded)) {
-        std::fprintf(stderr, "rom error %d: %s\n", static_cast<int>(*err), args->rom.c_str());
-        return fail("could not load the ROM");
+    g_lang = systemLang();
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO) != 0) {
+        std::fprintf(stderr, "SDL_Init failed\n");
+        return 0;
     }
-    const Rom& rom = std::get<Rom>(loaded);
-
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO) != 0) return fail("SDL_Init failed");
     SDL_Window* window = SDL_CreateWindow("Equinox SNES", SDL_WINDOWPOS_UNDEFINED,
                                           SDL_WINDOWPOS_UNDEFINED, 1280, 720, SDL_WINDOW_SHOWN);
-    int rc = 0;
     {
         Video video;
         Input input;
         Audio audio;
         Core core;
+        MenuView view;
         if (!window || !video.init(window, showFps)) {
-            rc = fail("video init failed");
+            std::fprintf(stderr, "video init failed\n");
         } else {
             input.init();
-            core.onVideo = [&](const void* px, unsigned w, unsigned h, size_t pitch) {
-                video.upload(px, w, h, pitch);
-            };
-            core.onInput = [&](unsigned port, unsigned id) { return input.state(port, id); };
-            if (!core.load(rom, args->saves, args->rom)) {
-                rc = fail("core failed to load the ROM");
+            if (!view.init(video.renderer())) std::fprintf(stderr, "menu text unavailable\n");
+
+            if (!args) {
+                showError(video, input, view, Str::OpenFromEquinox, false);
             } else {
-                if (audio.init(core.sampleRate(), core.fps()))
-                    core.onAudio = [&](const int16_t* lr, size_t frames) { audio.push(lr, frames); };
-                else
-                    std::fprintf(stderr, "audio init failed; running silent\n");
-                g_sram.attach(&core, srmPath(args->saves, args->rom));
+                auto loaded = loadRom(args->rom);
+                if (auto* err = std::get_if<RomError>(&loaded)) {
+                    std::fprintf(stderr, "rom error %d: %s\n", static_cast<int>(*err), args->rom.c_str());
+                    showError(video, input, view, romErrorText(*err), true);
+                } else {
+                    const Rom& rom = std::get<Rom>(loaded);
+                    core.onVideo = [&](const void* px, unsigned w, unsigned h, size_t pitch) {
+                        video.upload(px, w, h, pitch);
+                    };
+                    core.onInput = [&](unsigned port, unsigned id) { return input.state(port, id); };
+                    if (!core.load(rom, args->saves, args->rom)) {
+                        std::fprintf(stderr, "core failed to load the ROM\n");
+                        showError(video, input, view, Str::RomUnsupported, true);
+                    } else {
+                        if (audio.init(core.sampleRate(), core.fps()))
+                            core.onAudio = [&](const int16_t* lr, size_t frames) { audio.push(lr, frames); };
+                        else
+                            std::fprintf(stderr, "audio init failed; running silent\n");
+                        g_sram.attach(&core, srmPath(args->saves, args->rom));
 #ifdef __SWITCH__
-                appletHook(&g_hookCookie, appletHookFn, nullptr);
+                        appletHook(&g_hookCookie, appletHookFn, nullptr);
 #endif
-                bool running = true;
-                while (running) {
-                    SDL_Event e;
-                    while (SDL_PollEvent(&e)) {
-                        if (e.type == SDL_QUIT) running = false;
-                        if (e.type == SDL_APP_WILLENTERBACKGROUND || e.type == SDL_APP_TERMINATING)
-                            g_sram.flush();
-                        input.handleEvent(e);
+                        gameLoop(*args, video, input, audio, core, view);
+#ifdef __SWITCH__
+                        appletUnhook(&g_hookCookie);
+#endif
+                        g_sram.detach();
+                        audio.shutdown();
+                        core.unload();
                     }
-                    // Development exit until the Task 7 menu: Plus+Minus held for 2 s.
-                    if (input.comboHeld(2000)) running = false;
-                    core.runFrame();
-                    g_sram.tick();
-                    video.present();  // vsync paces one frame per refresh
                 }
-                g_sram.flush();  // exit: before the scheduled return to Equinox fires
-#ifdef __SWITCH__
-                appletUnhook(&g_hookCookie);
-#endif
-                g_sram.detach();
-                audio.shutdown();
-                core.unload();
             }
+            view.shutdown();
             input.shutdown();
         }
     }
     if (window) SDL_DestroyWindow(window);
     SDL_Quit();
-    return rc;
+    return 0;
 }

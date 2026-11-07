@@ -55,6 +55,7 @@ void Input::handleEvent(const SDL_Event& e) {
     } else if (e.type == SDL_JOYDEVICEREMOVED) {
         for (auto& slot : all_)
             if (slot && SDL_JoystickInstanceID(slot) == e.jdevice.which) {
+                if (slot == pads_[0]) padLost_ = true;
                 SDL_JoystickClose(slot);
                 slot = nullptr;
             }
@@ -84,15 +85,33 @@ int16_t Input::state(unsigned port, unsigned id) const {
     }
 }
 
-bool Input::comboHeld(Uint32 ms) {
-    bool both = false;
-    for (auto* j : pads_)
-        if (j && SDL_JoystickGetButton(j, kPlus) && SDL_JoystickGetButton(j, kMinus)) both = true;
-    if (!both) {
-        comboSince_ = 0;
-        return false;
+Input::Edges Input::poll() {
+    bool up = false, down = false, a = false, b = false, combo = false;
+    for (auto* j : pads_) {
+        if (!j) continue;
+        const int ay = SDL_JoystickGetAxis(j, 1);
+        up |= SDL_JoystickGetButton(j, kUp) || ay < -kDeadzone;
+        down |= SDL_JoystickGetButton(j, kDown) || ay > kDeadzone;
+        a |= SDL_JoystickGetButton(j, kA) != 0;
+        b |= SDL_JoystickGetButton(j, kB) != 0;
+        combo |= SDL_JoystickGetButton(j, kZL) && SDL_JoystickGetButton(j, kZR);
     }
-    const Uint32 now = SDL_GetTicks();
-    if (!comboSince_) comboSince_ = now ? now : 1;
-    return now - comboSince_ >= ms;
+    Edges e;
+    e.up = up && !prevUp_;
+    e.down = down && !prevDown_;
+    e.confirm = a && !prevA_;
+    e.back = b && !prevB_;
+    e.menuCombo = combo && !prevCombo_;
+    prevUp_ = up;
+    prevDown_ = down;
+    prevA_ = a;
+    prevB_ = b;
+    prevCombo_ = combo;
+    return e;
+}
+
+bool Input::takePadLost() {
+    const bool lost = padLost_;
+    padLost_ = false;
+    return lost;
 }
