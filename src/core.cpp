@@ -3,6 +3,7 @@
 #include <cstdarg>
 #include <cstdio>
 
+#include "core_options.hpp"
 #include "libretro.h"
 
 namespace {
@@ -10,6 +11,8 @@ namespace {
 Core* g_core = nullptr;
 std::string g_systemDir;
 bool g_rgb565 = false;
+bool g_ntsc = false;
+bool g_optionsChanged = false;  // GET_VARIABLE_UPDATE reports it once
 
 void logCb(enum retro_log_level level, const char* fmt, ...) {
     if (level < RETRO_LOG_WARN) return;
@@ -39,11 +42,17 @@ bool envCb(unsigned cmd, void* data) {
             return true;
         case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS:
             return true;
+        case RETRO_ENVIRONMENT_GET_VARIABLE: {
+            auto* var = static_cast<retro_variable*>(data);
+            var->value = coreOptionValue(var->key, g_ntsc);
+            return var->value != nullptr;
+        }
         case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
-            *static_cast<bool*>(data) = false;
+            *static_cast<bool*>(data) = g_optionsChanged;
+            g_optionsChanged = false;
             return true;
         default:
-            return false;  // core options and the rest: defaults
+            return false;  // other core options and the rest: defaults
     }
 }
 
@@ -146,4 +155,10 @@ std::vector<uint8_t> Core::serialize() {
 
 bool Core::unserialize(std::span<const uint8_t> state) {
     return loaded_ && !state.empty() && retro_unserialize(state.data(), state.size());
+}
+
+void Core::setNtsc(bool on) {
+    if (on == g_ntsc) return;
+    g_ntsc = on;
+    g_optionsChanged = true;
 }

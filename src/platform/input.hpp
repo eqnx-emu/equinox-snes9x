@@ -19,7 +19,8 @@ public:
     void suppressHeld();
     // Buttons newly pressed since the previous poll(); call once per frame.
     struct Edges {
-        bool up = false, down = false, confirm = false, back = false;  // D-pad/stick, A, B
+        bool up = false, down = false, left = false, right = false;  // D-pad or left stick
+        bool confirm = false, back = false;                          // A, B
         bool menuCombo = false;                                         // ZL+ZR together
     };
     Edges poll();
@@ -31,7 +32,7 @@ private:
     void rebuild();
     SDL_Joystick* pads_[2] = {nullptr, nullptr};
     SDL_Joystick* all_[8] = {};
-    bool prevUp_ = false, prevDown_ = false, prevA_ = false, prevB_ = false, prevCombo_ = false;
+    bool prevUp_ = false, prevDown_ = false, prevLeft_ = false, prevRight_ = false, prevA_ = false, prevB_ = false, prevCombo_ = false;
     bool padLost_ = false;
     ReleaseMask release_[2];
 };

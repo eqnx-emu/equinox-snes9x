@@ -8,11 +8,11 @@ constexpr int kProtocolVersion = 1;
 
 struct LaunchArgs {
     int protocol = 0;
-    std::string rom, title, saves, states, returnPath, resumeToken;
+    std::string rom, title, saves, states, returnPath, resumeToken, cover, video;
 };
 
 // Reads: <self> --protocol 1 --rom <p> --title <t> --saves <dir> --states <dir>
-//             --return <equinox.nro> --resume <token>
+//             --return <equinox.nro> --resume <token> [--cover <png>] [--video <json>]
 // Returns std::nullopt when --rom or --return is missing, or protocol != kProtocolVersion.
 std::optional<LaunchArgs> parseArgs(int argc, const char* const* argv);
 

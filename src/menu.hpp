@@ -1,7 +1,7 @@
 #pragma once
 
-enum class MenuItem { Continue, SaveState, LoadState, Exit };
-enum class MenuAction { None, Close, SaveState, LoadState, Exit };
+enum class MenuItem { Continue, SaveState, LoadState, Video, Exit };
+enum class MenuAction { None, Close, SaveState, LoadState, OpenVideo, Exit };
 
 // In-game menu state. Without a saved state "Load state" is disabled and skipped by up/down.
 class Menu {

@@ -6,24 +6,31 @@
 #include <cstring>
 #include <exception>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <variant>
 
 #include "args.hpp"
 #include "async_writer.hpp"
 #include "core.hpp"
+#include "core_options.hpp"
 #include "file_io.hpp"
 #include "menu.hpp"
 #include "paths.hpp"
 #include "platform/audio.hpp"
 #include "platform/input.hpp"
 #include "platform/menu_view.hpp"
+#include "platform/png_load.hpp"
 #include "platform/relaunch.hpp"
 #include "platform/video.hpp"
 #include "rom.hpp"
 #include "strings.hpp"
+#include "video_art.hpp"
+#include "video_menu.hpp"
+#include "video_prefs.hpp"
 
 #ifdef __SWITCH__
 #include <switch.h>
@@ -153,6 +160,39 @@ static void appletHookFn(AppletHookType type, void*) {
 #endif
 
 
+// Docked, the runner renders 1920x1080; handheld, 1280x720.
+static bool isDocked() {
+#ifdef __SWITCH__
+    return appletGetOperationMode() == AppletOperationMode_Console;
+#else
+    return false;
+#endif
+}
+
+static void screenSize(bool docked, int& w, int& h) {
+    w = docked ? 1920 : 1280;
+    h = docked ? 1080 : 720;
+}
+
+// Called once per frame: follows the console into and out of the dock. The screen
+// tracks the size SDL actually renders at, which may settle a few frames after the
+// window is resized (or not follow it at all).
+static void followDock(SDL_Window* window, Video& video, bool& docked) {
+    const bool now = isDocked();
+    if (now != docked) {
+        docked = now;
+        int w = 0, h = 0;
+        screenSize(docked, w, h);
+        SDL_SetWindowSize(window, w, h);
+        std::fprintf(stderr, "%s: asked %dx%d\n", docked ? "docked" : "handheld", w, h);
+    }
+    int ow = 0, oh = 0;
+    if (SDL_GetRendererOutputSize(video.renderer(), &ow, &oh) != 0 || ow <= 0 || oh <= 0) return;
+    if (ow == video.screenW() && oh == video.screenH()) return;
+    video.setScreen(ow, oh);
+    std::fprintf(stderr, "renderer output %dx%d\n", ow, oh);
+}
+
 static bool fileExists(const std::string& path) {
     if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
         std::fclose(f);
@@ -174,6 +214,7 @@ static void showError(Video& video, Input& input, MenuView& view, Str msg, bool 
         const auto edges = input.poll();
         if (edges.confirm || (!withBack && edges.back)) return;
         if (!withBack && SDL_GetTicks() - start > 8000) return;
+        view.setScreenHeight(video.screenH());
         view.drawError(tr(g_lang, msg), withBack, g_lang);
         video.flip();
     }
@@ -191,12 +232,41 @@ static Str romErrorText(RomError e) {
 }
 
 // The menu, savestates and the frame loop.
-static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& audio, Core& core,
-                     MenuView& view) {
+static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Video& video,
+                     Input& input, Audio& audio, Core& core, MenuView& view) {
     const std::string stateFile = statePath(args.states, args.rom);
     const std::string title = args.title.empty() ? romStem(args.rom) : args.title;
     Menu menu;
     bool running = true;
+
+    // The game file keeps the options changed in this game (see updateOverrides).
+    const VideoPrefs globalPrefs = loadPrefs(args.video);  // empty without --video
+    const VideoSettings globalSettings = resolve(globalPrefs, {});
+    const std::string videoFile = videoPrefsPath(args.saves, args.rom);
+    VideoSettings videoSettings;
+    // The NTSC filter is drawn by the core, so a paused picture only changes with a new
+    // frame. That frame gets no input and no audio, and the state is put back afterwards:
+    // the game does not move on, nothing it does reaches SRAM, nothing plays on resume.
+    auto refreshPausedFrame = [&] {
+        const auto st = core.serialize();
+        if (st.empty()) return;  // the new filter shows on resume
+        auto onAudio = std::exchange(core.onAudio, nullptr);
+        auto onInput = std::exchange(core.onInput, nullptr);
+        core.runFrame();
+        core.onAudio = std::move(onAudio);
+        core.onInput = std::move(onInput);
+        if (!core.unserialize(st)) std::fprintf(stderr, "could not restore the paused state\n");
+    };
+    auto applyVideo = [&](const VideoSettings& s) {
+        const bool ntscChanged = ntscFor(s.filter) != ntscFor(videoSettings.filter);
+        videoSettings = s;
+        video.setSettings(s);
+        core.setNtsc(ntscFor(s.filter));
+        if (ntscChanged && menu.isOpen()) refreshPausedFrame();
+    };
+    VideoPrefs gamePrefs = loadPrefs(videoFile);
+    applyVideo(resolve(globalPrefs, gamePrefs));
+    std::optional<VideoMenu> videoMenu;  // open over the paused game, from the pause menu
 
     auto openMenu = [&] {
         menu.setHasState(fileExists(stateFile));
@@ -230,12 +300,54 @@ static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& 
         }
     };
 
+    // The game file is written when the video menu closes, or on the way out while it is open.
+    auto saveVideoPrefs = [&] {
+        const VideoPrefs next = updateOverrides(gamePrefs, globalSettings, videoMenu->settings());
+        if (savePrefs(videoFile, next)) {
+            gamePrefs = next;
+            return true;
+        }
+        std::fprintf(stderr, "could not save %s\n", videoFile.c_str());
+        return false;
+    };
+
+    auto videoMenuInput = [&](const Input::Edges& edges) {
+        VideoMenu& vm = *videoMenu;
+        if (edges.up) vm.moveCursor(-1);
+        if (edges.down) vm.moveCursor(1);
+        VideoAction act = VideoAction::None;
+        if (edges.confirm) act = vm.confirm();
+        else if (edges.back) act = vm.back();
+        else if (edges.up || edges.down) {}  // a diagonal push only moves the cursor
+        else if (edges.left) act = vm.change(-1);
+        else if (edges.right) act = vm.change(1);
+        switch (act) {
+            case VideoAction::Changed: applyVideo(vm.settings()); break;
+            case VideoAction::UseDefault:
+                gamePrefs = {};  // the game follows the global default again
+                vm.reset(globalSettings);
+                applyVideo(vm.settings());
+                break;
+            case VideoAction::Close:
+                if (!saveVideoPrefs()) g_toasts.show(tr(g_lang, Str::VideoSaveFailed));
+                videoMenu.reset();  // back to the pause menu
+                break;
+            case VideoAction::None: break;
+        }
+    };
+
     while (running) {
+        followDock(window, video, docked);
+        view.setScreenHeight(video.screenH());
         bool touched = false;
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) running = false;
             if (e.type == SDL_APP_WILLENTERBACKGROUND || e.type == SDL_APP_TERMINATING) g_sram.flush();
+            if (e.type == SDL_APP_TERMINATING && videoMenu) {
+                saveVideoPrefs();
+                videoMenu.reset();  // saved once; the exit path must not write it again
+            }
             if (e.type == SDL_FINGERDOWN) touched = true;
             input.handleEvent(e);
         }
@@ -244,6 +356,8 @@ static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& 
 
         if (!menu.isOpen()) {
             if (edges.menuCombo || touched || padLost) openMenu();
+        } else if (videoMenu) {
+            videoMenuInput(edges);
         } else {
             MenuAction act = MenuAction::None;
             if (edges.up) menu.up();
@@ -254,6 +368,7 @@ static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& 
                 case MenuAction::Close: closeMenu(); break;
                 case MenuAction::SaveState: saveState(); break;
                 case MenuAction::LoadState: loadState(); break;
+                case MenuAction::OpenVideo: videoMenu.emplace(videoSettings); break;
                 case MenuAction::Exit:
                     g_sram.flush();
                     if (!scheduleReturn(args))
@@ -264,7 +379,10 @@ static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& 
             }
         }
 
-        if (menu.isOpen()) {
+        if (videoMenu) {
+            video.drawGame();
+            view.drawVideoMenu(*videoMenu, g_lang);
+        } else if (menu.isOpen()) {
             video.drawGame();
             view.drawMenu(menu, title, g_lang);
         } else {
@@ -275,6 +393,7 @@ static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& 
         if (g_toasts.active()) view.drawToast(g_toasts.text());
         video.flip();  // vsync paces one frame per refresh
     }
+    if (videoMenu) saveVideoPrefs();  // no toast: nothing is drawn any more
     g_sram.flush();  // exit: before the scheduled return to Equinox fires
 }
 
@@ -303,8 +422,11 @@ public:
 };
 
 static void run(const std::optional<LaunchArgs>& args, bool showFps, SDL_Window*& window) {
-    window = SDL_CreateWindow("Equinox SNES", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1280,
-                              720, SDL_WINDOW_SHOWN);
+    const bool docked = isDocked();
+    int screenW = 0, screenH = 0;
+    screenSize(docked, screenW, screenH);
+    window = SDL_CreateWindow("Equinox SNES", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screenW,
+                              screenH, SDL_WINDOW_SHOWN);
     Video video;
     Input input;
     Audio audio;
@@ -338,9 +460,18 @@ static void run(const std::optional<LaunchArgs>& args, bool showFps, SDL_Window*
                     core.onAudio = [&](const int16_t* lr, size_t frames) { audio.push(lr, frames); };
                 else
                     std::fprintf(stderr, "audio init failed; running silent\n");
+                // Decoded and blurred once, before the first frame. Out of memory means no
+                // cover, which falls back to the Equinox border.
+                if (!args->cover.empty()) {
+                    try {
+                        video.setCover(blurCover(loadPng(args->cover), screenW / 8, screenH / 8));
+                    } catch (const std::bad_alloc&) {
+                        std::fprintf(stderr, "cover too large for memory: %s\n", args->cover.c_str());
+                    }
+                }
                 {
                     SramSession session(core, srmPath(args->saves, args->rom));
-                    gameLoop(*args, video, input, audio, core, view);
+                    gameLoop(*args, window, docked, video, input, audio, core, view);
                 }
                 audio.shutdown();
                 core.unload();

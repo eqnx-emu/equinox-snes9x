@@ -1,7 +1,7 @@
 #include "menu.hpp"
 
 namespace {
-constexpr int kCount = 4;
+constexpr int kCount = 5;
 }
 
 void Menu::open() {
@@ -38,6 +38,7 @@ MenuAction Menu::confirm() {
         case MenuItem::Continue: open_ = false; return MenuAction::Close;
         case MenuItem::SaveState: return MenuAction::SaveState;
         case MenuItem::LoadState: return hasState_ ? MenuAction::LoadState : MenuAction::None;
+        case MenuItem::Video: return MenuAction::OpenVideo;
         case MenuItem::Exit: return MenuAction::Exit;
     }
     return MenuAction::None;

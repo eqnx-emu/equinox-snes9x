@@ -26,6 +26,9 @@ public:
     std::span<uint8_t> saveRam();                      // empty when the game has none
     std::vector<uint8_t> serialize();
     bool unserialize(std::span<const uint8_t> state);
+    // The Blargg NTSC composite filter (snes9x_blargg). Takes effect on the next frame;
+    // before load(), from the first one.
+    void setNtsc(bool on);
 
     // Wired by the platform layer.
     std::function<void(const void* px, unsigned w, unsigned h, size_t pitch)> onVideo;

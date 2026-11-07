@@ -20,3 +20,8 @@ TEST_CASE("stem keeps dots inside name") {
 TEST_CASE("state path") {
     CHECK(statePath("/st", "/r/Game.zip") == "/st/Game.state");
 }
+
+TEST_CASE("video prefs path uses zip name") {
+    CHECK(videoPrefsPath("sdmc:/s", "sdmc:/r/Chrono Trigger (USA).zip") ==
+          "sdmc:/s/Chrono Trigger (USA).video.json");
+}
