@@ -24,6 +24,7 @@ public:
     // Takes an already blurred cover; an empty image removes it.
     void setCover(Image blurred);
     bool hasCover() const { return cover_ != nullptr; }
+    int screenW() const { return screenW_; }
     int screenH() const { return screenH_; }
 
     void upload(const void* px, unsigned w, unsigned h, size_t pitch);

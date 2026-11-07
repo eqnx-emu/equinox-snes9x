@@ -174,23 +174,23 @@ static void screenSize(bool docked, int& w, int& h) {
     h = docked ? 1080 : 720;
 }
 
-// Called once per frame: follows the console into and out of the dock.
+// Called once per frame: follows the console into and out of the dock. The screen
+// tracks the size SDL actually renders at, which may settle a few frames after the
+// window is resized (or not follow it at all).
 static void followDock(SDL_Window* window, Video& video, bool& docked) {
     const bool now = isDocked();
-    if (now == docked) return;
-    docked = now;
-    int w = 0, h = 0;
-    screenSize(docked, w, h);
-    SDL_SetWindowSize(window, w, h);
-    // Draw for the size SDL actually renders at, in case it did not follow.
-    int ow = 0, oh = 0;
-    if (SDL_GetRendererOutputSize(video.renderer(), &ow, &oh) != 0 || ow <= 0 || oh <= 0) {
-        ow = w;
-        oh = h;
+    if (now != docked) {
+        docked = now;
+        int w = 0, h = 0;
+        screenSize(docked, w, h);
+        SDL_SetWindowSize(window, w, h);
+        std::fprintf(stderr, "%s: asked %dx%d\n", docked ? "docked" : "handheld", w, h);
     }
+    int ow = 0, oh = 0;
+    if (SDL_GetRendererOutputSize(video.renderer(), &ow, &oh) != 0 || ow <= 0 || oh <= 0) return;
+    if (ow == video.screenW() && oh == video.screenH()) return;
     video.setScreen(ow, oh);
-    std::fprintf(stderr, "%s: asked %dx%d, renderer output %dx%d\n", docked ? "docked" : "handheld",
-                 w, h, ow, oh);
+    std::fprintf(stderr, "renderer output %dx%d\n", ow, oh);
 }
 
 static bool fileExists(const std::string& path) {
@@ -299,6 +299,13 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
         }
     };
 
+    // The game file is written when the video menu closes, or on the way out while it is open.
+    auto saveVideoPrefs = [&] {
+        if (savePrefs(videoFile, overridesFor(globalSettings, videoMenu->settings()))) return true;
+        std::fprintf(stderr, "could not save %s\n", videoFile.c_str());
+        return false;
+    };
+
     auto videoMenuInput = [&](const Input::Edges& edges) {
         VideoMenu& vm = *videoMenu;
         if (edges.up) vm.moveCursor(-1);
@@ -315,10 +322,7 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
                 applyVideo(vm.settings());
                 break;
             case VideoAction::Close:
-                if (!savePrefs(videoFile, overridesFor(globalSettings, vm.settings()))) {
-                    std::fprintf(stderr, "could not save %s\n", videoFile.c_str());
-                    g_toasts.show(tr(g_lang, Str::VideoSaveFailed));
-                }
+                if (!saveVideoPrefs()) g_toasts.show(tr(g_lang, Str::VideoSaveFailed));
                 videoMenu.reset();  // back to the pause menu
                 break;
             case VideoAction::None: break;
@@ -333,6 +337,7 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) running = false;
             if (e.type == SDL_APP_WILLENTERBACKGROUND || e.type == SDL_APP_TERMINATING) g_sram.flush();
+            if (e.type == SDL_APP_TERMINATING && videoMenu) saveVideoPrefs();
             if (e.type == SDL_FINGERDOWN) touched = true;
             input.handleEvent(e);
         }
@@ -378,6 +383,7 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
         if (g_toasts.active()) view.drawToast(g_toasts.text());
         video.flip();  // vsync paces one frame per refresh
     }
+    if (videoMenu) saveVideoPrefs();  // no toast: nothing is drawn any more
     g_sram.flush();  // exit: before the scheduled return to Equinox fires
 }
 
