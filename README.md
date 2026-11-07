@@ -14,7 +14,8 @@ Equinox app (a Moonlight fork) to play SNES games.
   terms apply to it. That is why the runner is distributed separately from
   Equinox and is not bundled with it.
 - The frontend (the code in `src/`, `tests/`, `docker/`, `tools/`): this repository
-  has no LICENSE file yet; see LICENSE once one is added.
+  is MIT (see `LICENSE`). The MIT terms cover only this code; the built `.nro`
+  as a whole is still bound by the Snes9x terms above.
 - `extern/miniz` is MIT (see `extern/miniz/LICENSE`).
 
 ## Build
