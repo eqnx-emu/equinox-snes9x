@@ -73,6 +73,9 @@ jobs:
       contents: read
     container:
       image: devkitpro/devkita64:latest
+    defaults:
+      run:
+        shell: bash
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
