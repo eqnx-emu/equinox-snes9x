@@ -3,8 +3,14 @@
 #include <SDL2/SDL.h>
 
 #include <cstdio>
+#include <cstring>
+#include <variant>
 
 #include "args.hpp"
+#include "core.hpp"
+#include "platform/input.hpp"
+#include "platform/video.hpp"
+#include "rom.hpp"
 #include "platform/relaunch.hpp"
 
 #ifdef __SWITCH__
@@ -33,27 +39,59 @@ int main(int argc, char** argv) {
     }
     scheduleReturn(*args);
 
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) return 1;
+    bool showFps = false;
+    for (int i = 1; i < argc; ++i)
+        if (!std::strcmp(argv[i], "--show-fps")) showFps = true;
 
+    auto fail = [](const char* what) {
+        std::fprintf(stderr, "%s\n", what);
+        return 0;  // the return to Equinox is already scheduled; Task 7 adds the error screen
+    };
+
+    auto loaded = loadRom(args->rom);
+    if (auto* err = std::get_if<RomError>(&loaded)) {
+        std::fprintf(stderr, "rom error %d: %s\n", static_cast<int>(*err), args->rom.c_str());
+        return fail("could not load the ROM");
+    }
+    const Rom& rom = std::get<Rom>(loaded);
+
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) != 0) return fail("SDL_Init failed");
     SDL_Window* window = SDL_CreateWindow("Equinox SNES", SDL_WINDOWPOS_UNDEFINED,
                                           SDL_WINDOWPOS_UNDEFINED, 1280, 720, SDL_WINDOW_SHOWN);
-    SDL_Renderer* renderer =
-        window ? SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC)
-               : nullptr;
-
-    if (renderer) {
-        const Uint32 start = SDL_GetTicks();
-        while (SDL_GetTicks() - start < 2000) {
-            SDL_Event e;
-            while (SDL_PollEvent(&e)) {}
-            SDL_SetRenderDrawColor(renderer, 0x0d, 0x10, 0x18, 0xff);
-            SDL_RenderClear(renderer);
-            SDL_RenderPresent(renderer);
+    int rc = 0;
+    {
+        Video video;
+        Input input;
+        Core core;
+        if (!window || !video.init(window, showFps)) {
+            rc = fail("video init failed");
+        } else {
+            input.init();
+            core.onVideo = [&](const void* px, unsigned w, unsigned h, size_t pitch) {
+                video.upload(px, w, h, pitch);
+            };
+            core.onInput = [&](unsigned port, unsigned id) { return input.state(port, id); };
+            if (!core.load(rom, args->saves, args->rom)) {
+                rc = fail("core failed to load the ROM");
+            } else {
+                bool running = true;
+                while (running) {
+                    SDL_Event e;
+                    while (SDL_PollEvent(&e)) {
+                        if (e.type == SDL_QUIT) running = false;
+                        input.handleEvent(e);
+                    }
+                    // Development exit until the Task 7 menu: Plus+Minus held for 2 s.
+                    if (input.comboHeld(2000)) running = false;
+                    core.runFrame();
+                    video.present();  // vsync paces one frame per refresh
+                }
+                core.unload();
+            }
+            input.shutdown();
         }
     }
-
-    if (renderer) SDL_DestroyRenderer(renderer);
     if (window) SDL_DestroyWindow(window);
     SDL_Quit();
-    return 0;
+    return rc;
 }

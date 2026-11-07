@@ -22,6 +22,8 @@ option(EQX_HOST_TESTS "Build the host unit tests" OFF)
 file(GLOB_RECURSE EQX_ALL_SRC CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 set(EQX_LOGIC_SRC ${EQX_ALL_SRC})
 list(FILTER EQX_LOGIC_SRC EXCLUDE REGEX "/src/platform/")
+# core.cpp calls into the libretro core, which is only linked for the Switch.
+list(FILTER EQX_LOGIC_SRC EXCLUDE REGEX "/src/core\\.cpp$")
 
 # Vendored miniz (MIT): memory APIs only, and no zlib-name clashes with portlibs zlib.
 add_compile_definitions(MINIZ_NO_STDIO MINIZ_NO_TIME MINIZ_NO_ZLIB_COMPATIBLE_NAMES)
@@ -42,7 +44,19 @@ if (NINTENDO_SWITCH)
 
     set(PORTLIBS_SWITCH /opt/devkitpro/portlibs/switch)
 
-    add_executable(equinox-snes9x ${EQX_ALL_SRC} ${EQX_MINIZ_SRC})
+    # The libnx core is built with STATIC_LINKING: the frontend supplies libretro-common's
+    # file streams, VFS and inflate.
+    set(RC ${CMAKE_CURRENT_SOURCE_DIR}/extern/snes9x/libretro/libretro-common)
+    set(EQX_LIBRETRO_COMMON_SRC
+        ${RC}/compat/compat_posix_string.c ${RC}/compat/compat_strcasestr.c
+        ${RC}/compat/compat_snprintf.c ${RC}/compat/compat_strl.c ${RC}/compat/fopen_utf8.c
+        ${RC}/encodings/encoding_utf.c ${RC}/encodings/encoding_deflate.c
+        ${RC}/file/file_path.c ${RC}/file/file_path_io.c ${RC}/file/retro_dirent.c
+        ${RC}/streams/file_stream.c ${RC}/streams/file_stream_transforms.c
+        ${RC}/string/stdstring.c ${RC}/time/rtime.c
+        ${RC}/vfs/vfs_implementation.c)
+
+    add_executable(equinox-snes9x ${EQX_ALL_SRC} ${EQX_MINIZ_SRC} ${EQX_LIBRETRO_COMMON_SRC})
     target_link_directories(equinox-snes9x PRIVATE ${PORTLIBS_SWITCH}/lib)
     target_include_directories(equinox-snes9x PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
