@@ -8,6 +8,7 @@
 
 #include "args.hpp"
 #include "core.hpp"
+#include "platform/audio.hpp"
 #include "platform/input.hpp"
 #include "platform/video.hpp"
 #include "rom.hpp"
@@ -55,13 +56,14 @@ int main(int argc, char** argv) {
     }
     const Rom& rom = std::get<Rom>(loaded);
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) != 0) return fail("SDL_Init failed");
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO) != 0) return fail("SDL_Init failed");
     SDL_Window* window = SDL_CreateWindow("Equinox SNES", SDL_WINDOWPOS_UNDEFINED,
                                           SDL_WINDOWPOS_UNDEFINED, 1280, 720, SDL_WINDOW_SHOWN);
     int rc = 0;
     {
         Video video;
         Input input;
+        Audio audio;
         Core core;
         if (!window || !video.init(window, showFps)) {
             rc = fail("video init failed");
@@ -74,6 +76,10 @@ int main(int argc, char** argv) {
             if (!core.load(rom, args->saves, args->rom)) {
                 rc = fail("core failed to load the ROM");
             } else {
+                if (audio.init(core.sampleRate(), core.fps()))
+                    core.onAudio = [&](const int16_t* lr, size_t frames) { audio.push(lr, frames); };
+                else
+                    std::fprintf(stderr, "audio init failed; running silent\n");
                 bool running = true;
                 while (running) {
                     SDL_Event e;
@@ -86,6 +92,7 @@ int main(int argc, char** argv) {
                     core.runFrame();
                     video.present();  // vsync paces one frame per refresh
                 }
+                audio.shutdown();
                 core.unload();
             }
             input.shutdown();
