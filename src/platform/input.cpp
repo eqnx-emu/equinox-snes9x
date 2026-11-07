@@ -39,6 +39,12 @@ void Input::handleEvent(const SDL_Event& e) {
     if (e.type == SDL_JOYDEVICEADDED) {
         SDL_Joystick* j = SDL_JoystickOpen(e.jdevice.which);
         if (!j) return;
+        // init() already opened devices present at startup; SDL queues ADDED for them too.
+        for (auto* known : all_)
+            if (known && SDL_JoystickInstanceID(known) == SDL_JoystickInstanceID(j)) {
+                SDL_JoystickClose(j);  // drop the extra reference
+                return;
+            }
         for (auto& slot : all_)
             if (!slot) {
                 slot = j;
