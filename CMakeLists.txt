@@ -36,6 +36,8 @@ if (EQX_HOST_TESTS)
     target_include_directories(eqx_tests PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_SOURCE_DIR}/extern)
+    find_package(Threads REQUIRED)
+    target_link_libraries(eqx_tests PRIVATE Threads::Threads)
     add_test(NAME eqx_tests COMMAND eqx_tests)
 endif ()
 

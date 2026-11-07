@@ -5,12 +5,14 @@
 #include <cstdio>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <variant>
 
 #include "args.hpp"
+#include "async_writer.hpp"
 #include "core.hpp"
 #include "file_io.hpp"
 #include "menu.hpp"
@@ -56,8 +58,13 @@ static Lang g_lang = Lang::EnUS;
 
 // Battery save (SRAM) persistence. Writes go through writeFileAtomic so a power cut
 // never leaves a half-written .srm. A write happens only when the content hash changed:
-// polled every 60 frames with at least 5 s between writes, and immediately (no delay)
-// on menu exit, losing focus (HOME), an exit request, and before returning to Equinox.
+// polled every 60 frames with at least 5 s between writes, and immediately on menu exit,
+// losing focus (HOME), an exit request, and before returning to Equinox.
+//
+// Autosaves run on a worker thread (AsyncWriter) from a copy of the SRAM, so the frame
+// loop only hashes and copies. That matters for Super FX carts, whose SRAM doubles as GSU
+// work RAM and changes every frame. flush() is synchronous: it returns once the latest
+// contents are on storage (or the write failed).
 class SramSaver {
 public:
     void attach(Core* core, std::string path) {
@@ -73,19 +80,30 @@ public:
             }
         lastHash_ = hash(core_->saveRam());
         lastWrite_ = SDL_GetTicks();
+        writer_ = std::make_unique<AsyncWriter>(path_, [](const std::string& p, std::span<const uint8_t> d) {
+            return writeFileAtomic(p, d);
+        });
     }
-    void detach() { core_ = nullptr; }
+    // Waits for the last write, then stops the worker.
+    void detach() {
+        writer_.reset();
+        core_ = nullptr;
+    }
 
     // Called once per frame.
     void tick() {
         if (!core_ || ++frames_ < 60) return;
         frames_ = 0;
+        checkFailure();
         if (SDL_GetTicks() - lastWrite_ < 5000) return;
-        write();
+        submitIfChanged();
     }
-    // Immediate write if the content changed.
+    // Writes now if the content changed, and waits until it is done.
     void flush() {
-        if (core_) write();
+        if (!core_) return;
+        submitIfChanged();
+        writer_->waitIdle();
+        checkFailure();
     }
 
 private:
@@ -94,21 +112,24 @@ private:
         for (uint8_t b : d) h = (h ^ b) * 1099511628211ull;
         return h;
     }
-    void write() {
+    void submitIfChanged() {
         auto ram = core_->saveRam();
         if (ram.empty()) return;
         const uint64_t h = hash(ram);
         if (h == lastHash_) return;
         lastWrite_ = SDL_GetTicks();
-        if (writeFileAtomic(path_, ram)) {
-            lastHash_ = h;
-        } else {
-            std::fprintf(stderr, "could not save %s\n", path_.c_str());  // retried on the next trigger
-            g_toasts.saveFailed(g_lang);
-        }
+        lastHash_ = h;
+        writer_->submit(std::vector<uint8_t>(ram.begin(), ram.end()));
+    }
+    void checkFailure() {
+        if (!writer_->takeFailure()) return;
+        std::fprintf(stderr, "could not save %s\n", path_.c_str());
+        lastHash_ = ~hash(core_->saveRam());  // force a retry on the next trigger
+        g_toasts.saveFailed(g_lang);
     }
     Core* core_ = nullptr;
     std::string path_;
+    std::unique_ptr<AsyncWriter> writer_;
     uint64_t lastHash_ = 0;
     Uint32 lastWrite_ = 0;
     int frames_ = 0;
