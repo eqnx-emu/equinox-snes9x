@@ -1,0 +1,134 @@
+# Builds the Switch NRO on every push to main and publishes it, with a
+# manifest.json, as a GitHub release named after the version in CMakeLists.txt.
+# Equinox reads the latest release, so bump VERSION_ALTER (or MINOR/MAJOR) to
+# ship an update; pushes that keep the same version are built and tested but do
+# not publish anything.
+name: Release
+permissions: {}
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      exists: ${{ steps.version.outputs.exists }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          get() { sed -n "s/^set(VERSION_$1 \"\([0-9]*\)\")/\1/p" CMakeLists.txt | tr -d '\r'; }
+          version="$(get MAJOR).$(get MINOR).$(get ALTER)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if gh release view "v${version}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release v${version} already exists, nothing to publish."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Publishing v${version}."
+          fi
+
+  test:
+    name: Host tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake g++
+
+      - name: Build and run
+        run: |
+          set -euo pipefail
+          cmake -B build/host -DEQX_HOST_TESTS=ON
+          cmake --build build/host -j"$(nproc)"
+          ctest --test-dir build/host --output-on-failure
+
+  build:
+    name: Build NRO
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: devkitpro/devkita64:latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          # docker/switch.sh expects the sources at /src and a build volume at /build.
+          ln -s "${GITHUB_WORKSPACE}" /src
+          mkdir -p /build
+          bash docker/switch.sh
+
+      - name: Manifest
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp build/docker/equinox-snes9x.nro dist/equinox-snes9x.nro
+          bash tools/manifest.sh dist/equinox-snes9x.nro "${VERSION}" > dist/manifest.json
+          cat dist/manifest.json
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: |
+            dist/equinox-snes9x.nro
+            dist/manifest.json
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: [version, build]
+    if: needs.version.outputs.exists == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download
+        uses: actions/download-artifact@v4
+        with:
+          name: release
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          sha="$(sha256sum equinox-snes9x.nro | cut -d' ' -f1)"
+          gh release create "v${VERSION}" equinox-snes9x.nro manifest.json \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "equinox-snes9x ${VERSION}" \
+            --notes "Switch build of ${GITHUB_SHA}. SHA256 of equinox-snes9x.nro: \`${sha}\`" \
+            --latest
