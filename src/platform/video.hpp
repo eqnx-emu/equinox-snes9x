@@ -15,7 +15,7 @@
 // size, screen size, settings), never per frame. Optional FPS counter.
 class Video {
 public:
-    // The screen starts at the window's size.
+    // The screen starts at the renderer output size.
     bool init(SDL_Window* window, bool showFps);
     ~Video();
 
@@ -39,6 +39,7 @@ private:
     void drawScanlines(const Rect& game);
     bool tvFrameShown() const;
     void ensureTv(const Rect& game);
+    void drawMesh(const std::vector<SDL_Vertex>& v, const std::vector<int>& idx);
     void drawFps();
     SDL_Texture* makeTexture(const Image& img, SDL_ScaleMode scale, SDL_BlendMode blend);
     void applyGameScaleMode();
@@ -49,14 +50,16 @@ private:
 
     SDL_Texture* tex_ = nullptr;  // the game frame
     unsigned w_ = 0, h_ = 0;
-    SDL_Texture* sharp_ = nullptr;  // Sharp: the frame enlarged k times with nearest
+    SDL_Texture* sharp_ = nullptr;  // Sharp: the frame enlarged by whole factors with nearest
     unsigned sharpW_ = 0, sharpH_ = 0;
     SDL_Texture* scan_ = nullptr;
     unsigned scanRows_ = 0;
     SDL_Texture* backdrop_ = nullptr;  // Equinox border, for the current screen
     SDL_Texture* cover_ = nullptr;
-    SDL_Texture* tvBack_ = nullptr;   // room, bezel and rim; full screen
-    SDL_Texture* tvFront_ = nullptr;  // rounded screen corners and glare; game sized
+    // TV frame: the room behind it, then meshes under and over the game, built for tvRect_.
+    SDL_Texture* tvRoom_ = nullptr;
+    std::vector<SDL_Vertex> tvBackV_, tvFrontV_;
+    std::vector<int> tvBackI_, tvFrontI_;
     Rect tvRect_{0, 0, 0, 0};
 
     bool showFps_ = false;

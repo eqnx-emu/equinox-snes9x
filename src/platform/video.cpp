@@ -18,6 +18,10 @@ constexpr float kRimInset = 8, kRimRadius = 22;
 constexpr float kScreenRadius = 18;
 constexpr float kLedX = 16, kLedY = 4, kLedSize = 6;
 constexpr float kRoomInner = 80;  // radius where the room gradient starts
+constexpr int kRoomDiv = 8;       // the room texture is screen / kRoomDiv, drawn linear
+constexpr int kArcSteps = 12;     // segments per rounded corner
+constexpr int kOutlinePoints = 4 * (kArcSteps + 1);
+constexpr float kPi = 3.14159265f;
 
 struct Rgb {
     float r, g, b;
@@ -31,82 +35,139 @@ Rgb mix(Rgb a, Rgb b, float t) {
     return {a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t};
 }
 
-uint32_t argb(Rgb c, float a = 1.0f) {
-    auto ch = [](float v) { return static_cast<uint32_t>(std::clamp(v + 0.5f, 0.0f, 255.0f)); };
-    return ch(a * 255.0f) << 24 | ch(c.r) << 16 | ch(c.g) << 8 | ch(c.b);
+Uint8 channel(float v) { return static_cast<Uint8>(std::clamp(v + 0.5f, 0.0f, 255.0f)); }
+
+SDL_Color color(Rgb c, float a = 1.0f) {
+    return SDL_Color{channel(c.r), channel(c.g), channel(c.b), channel(a * 255.0f)};
 }
 
-// Signed distance from (px, py) to a rounded rectangle; negative inside.
-float roundBoxDistance(float px, float py, float x, float y, float w, float h, float radius) {
-    const float hw = w * 0.5f, hh = h * 0.5f;
-    const float qx = std::fabs(px - (x + hw)) - (hw - radius);
-    const float qy = std::fabs(py - (y + hh)) - (hh - radius);
-    const float ox = std::max(qx, 0.0f), oy = std::max(qy, 0.0f);
-    return std::sqrt(ox * ox + oy * oy) + std::min(std::max(qx, qy), 0.0f) - radius;
+// The dim room behind the TV, at 1/kRoomDiv of the screen.
+Image tvRoom(int screenW, int screenH) {
+    Image img;
+    img.w = std::max(1, screenW / kRoomDiv);
+    img.h = std::max(1, screenH / kRoomDiv);
+    img.px.resize(static_cast<size_t>(img.w) * img.h);
+    const float cx = img.w * 0.5f, cy = img.h * 0.47f;
+    const float inner = kRoomInner * screenH / 720.0f / kRoomDiv, outer = img.w * 0.75f;
+    for (int y = 0; y < img.h; ++y)
+        for (int x = 0; x < img.w; ++x) {
+            const float d = std::hypot(x + 0.5f - cx, y + 0.5f - cy);
+            const SDL_Color c =
+                color(mix(kRoomCenter, kRoomEdge, std::clamp((d - inner) / (outer - inner), 0.0f, 1.0f)));
+            img.px[static_cast<size_t>(y) * img.w + x] =
+                0xFF000000u | uint32_t{c.r} << 16 | uint32_t{c.g} << 8 | c.b;
+        }
+    return img;
 }
 
-// How much of a pixel lies inside an edge `distance` away (one pixel of antialiasing).
-float coverage(float distance) { return std::clamp(0.5f - distance, 0.0f, 1.0f); }
+// Triangles with per-vertex colors, drawn in one SDL_RenderGeometry call.
+struct MeshBuilder {
+    std::vector<SDL_Vertex>& v;
+    std::vector<int>& idx;
 
-// Opaque, full screen: a dim room, the bezel and the dark rim around the game.
-Image tvBack(int screenW, int screenH, const Rect& g) {
-    const float s = screenH / 720.0f;
+    int add(float x, float y, SDL_Color c) {
+        v.push_back(SDL_Vertex{SDL_FPoint{x, y}, c, SDL_FPoint{0, 0}});
+        return static_cast<int>(v.size()) - 1;
+    }
+    void tri(int a, int b, int c) { idx.insert(idx.end(), {a, b, c}); }
+    // Quads between two runs of n points that start at a and b.
+    void strip(int a, int b, int n, bool closed) {
+        for (int i = 0; i < n - 1 + (closed ? 1 : 0); ++i) {
+            const int j = (i + 1) % n;
+            tri(a + i, b + i, b + j);
+            tri(a + i, b + j, a + j);
+        }
+    }
+};
+
+// Corner k of a rounded rectangle (TL, TR, BR, BL): arc center and start angle.
+void cornerArc(int k, float x, float y, float w, float h, float r, float& cx, float& cy, float& a0) {
+    cx = (k == 1 || k == 2) ? x + w - r : x + r;
+    cy = (k >= 2) ? y + h - r : y + r;
+    a0 = kPi + k * kPi * 0.5f;
+}
+
+// Points of corner k's arc at radius `radius`, from one edge to the other.
+template <class ColorAt>
+int arc(MeshBuilder& m, int k, float x, float y, float w, float h, float r, float radius, ColorAt colorAt) {
+    float cx, cy, a0;
+    cornerArc(k, x, y, w, h, r, cx, cy, a0);
+    const int first = static_cast<int>(m.v.size());
+    for (int i = 0; i <= kArcSteps; ++i) {
+        const float a = a0 + kPi * 0.5f * i / kArcSteps;
+        const float py = cy + std::sin(a) * radius;
+        m.add(cx + std::cos(a) * radius, py, colorAt(py));
+    }
+    return first;
+}
+
+// Outline of a rounded rectangle pushed `offset` pixels outwards, clockwise.
+template <class ColorAt>
+int outline(MeshBuilder& m, float x, float y, float w, float h, float r, float offset, ColorAt colorAt) {
+    const int first = static_cast<int>(m.v.size());
+    for (int k = 0; k < 4; ++k) arc(m, k, x, y, w, h, r, r + offset, colorAt);
+    return first;
+}
+
+// Rounded rectangle filled with a vertical gradient over its own height, with a
+// one-pixel antialiased edge. Colors are linear in y, so the fan interpolates exactly.
+void fillRound(MeshBuilder& m, float x, float y, float w, float h, float r, Rgb top, Rgb bottom) {
+    auto at = [&](float py, float a) {
+        return color(mix(top, bottom, std::clamp((py - y) / h, 0.0f, 1.0f)), a);
+    };
+    const int c = m.add(x + w * 0.5f, y + h * 0.5f, at(y + h * 0.5f, 1.0f));
+    const int in = outline(m, x, y, w, h, r, -0.5f, [&](float py) { return at(py, 1.0f); });
+    const int out = outline(m, x, y, w, h, r, 0.5f, [&](float py) { return at(py, 0.0f); });
+    for (int i = 0; i < kOutlinePoints; ++i) m.tri(c, in + i, in + (i + 1) % kOutlinePoints);
+    m.strip(in, out, kOutlinePoints, true);
+}
+
+// A band of constant color along a rounded rectangle's edge, from offset a to b.
+void ring(MeshBuilder& m, float x, float y, float w, float h, float r, float a, float b, SDL_Color c) {
+    auto same = [c](float) { return c; };
+    const int in = outline(m, x, y, w, h, r, a, same);
+    const int out = outline(m, x, y, w, h, r, b, same);
+    m.strip(in, out, kOutlinePoints, true);
+}
+
+// The bezel, its lit edge, the dark rim and the LED around the game.
+void tvBackMesh(MeshBuilder& m, const Rect& g, float s) {
     const float bx = g.x - kBezelX * s, by = g.y - kBezelY * s;
     const float bw = g.w + 2 * kBezelX * s, bh = g.h + 2 * kBezelY * s;
-    const float rx = g.x - kRimInset * s, ry = g.y - kRimInset * s;
-    const float rw = g.w + 2 * kRimInset * s, rh = g.h + 2 * kRimInset * s;
-    const float ledX = g.x + g.w + kLedX * s, ledY = g.y + g.h + kLedY * s, led = kLedSize * s;
-    const float cx = screenW * 0.5f, cy = screenH * 0.47f;
-    const float inner = kRoomInner * s, outer = screenW * 0.75f;
-
-    Image img;
-    img.w = screenW;
-    img.h = screenH;
-    img.px.resize(static_cast<size_t>(screenW) * screenH);
-    for (int y = 0; y < screenH; ++y) {
-        const float py = y + 0.5f;
-        const Rgb bezel = mix(kBezelTop, kBezelBottom, std::clamp((py - by) / bh, 0.0f, 1.0f));
-        for (int x = 0; x < screenW; ++x) {
-            const float px = x + 0.5f;
-            const float dist = std::hypot(px - cx, py - cy);
-            Rgb c = mix(kRoomCenter, kRoomEdge, std::clamp((dist - inner) / (outer - inner), 0.0f, 1.0f));
-            const float d = roundBoxDistance(px, py, bx, by, bw, bh, kBezelRadius * s);
-            c = mix(c, bezel, coverage(d));
-            c = mix(c, kWhite, kBezelEdgeAlpha * std::clamp(s + 0.5f - std::fabs(d), 0.0f, 1.0f));
-            c = mix(c, kRim, coverage(roundBoxDistance(px, py, rx, ry, rw, rh, kRimRadius * s)));
-            if (px >= ledX && px < ledX + led && py >= ledY && py < ledY + led) c = kLed;
-            img.px[static_cast<size_t>(y) * screenW + x] = argb(c);
-        }
-    }
-    return img;
+    fillRound(m, bx, by, bw, bh, kBezelRadius * s, kBezelTop, kBezelBottom);
+    ring(m, bx, by, bw, bh, kBezelRadius * s, -s, s, color(kWhite, kBezelEdgeAlpha));
+    const float in = kRimInset * s;
+    fillRound(m, g.x - in, g.y - in, g.w + 2 * in, g.h + 2 * in, kRimRadius * s, kRim, kRim);
+    const float lx = g.x + g.w + kLedX * s, ly = g.y + g.h + kLedY * s, l = kLedSize * s;
+    const SDL_Color led = color(kLed);
+    const int a = m.add(lx, ly, led), b = m.add(lx + l, ly, led);
+    const int c = m.add(lx + l, ly + l, led), d = m.add(lx, ly + l, led);
+    m.tri(a, b, c);
+    m.tri(a, c, d);
 }
 
-// Game sized, blended over the game: rim-colored rounded corners and a faint glare
+// Over the game, clipped to it: rim-colored rounded screen corners and a faint glare
 // from the top left.
-Image tvFront(int screenH, const Rect& g) {
-    const float s = screenH / 720.0f;
-    const float gx = g.w * 0.6f, gy = g.h * 0.6f, glen2 = gx * gx + gy * gy;
-
-    Image img;
-    img.w = g.w;
-    img.h = g.h;
-    img.px.resize(static_cast<size_t>(g.w) * g.h);
-    for (int y = 0; y < g.h; ++y) {
-        const float py = y + 0.5f;
-        for (int x = 0; x < g.w; ++x) {
-            const float px = x + 0.5f;
-            const float corner =
-                1.0f - coverage(roundBoxDistance(px, py, 0, 0, static_cast<float>(g.w),
-                                                 static_cast<float>(g.h), kScreenRadius * s));
-            const float t = (px * gx + py * gy) / glen2;
-            const float glare = t < 0.5f ? kGlareAlpha * (1.0f - t / 0.5f) : 0.0f;
-            const float a = corner + glare * (1.0f - corner);
-            uint32_t out = 0;
-            if (a > 0.0f) out = argb(mix(kRim, kWhite, glare * (1.0f - corner) / a), a);
-            img.px[static_cast<size_t>(y) * g.w + x] = out;
-        }
+void tvFrontMesh(MeshBuilder& m, const Rect& g, float s) {
+    const float r = kScreenRadius * s;
+    const float x = static_cast<float>(g.x), y = static_cast<float>(g.y);
+    const float w = static_cast<float>(g.w), h = static_cast<float>(g.h);
+    const float kx[4] = {x, x + w, x + w, x}, ky[4] = {y, y, y + h, y + h};
+    const SDL_Color solid = color(kRim), clear = color(kRim, 0.0f);
+    for (int k = 0; k < 4; ++k) {
+        const int corner = m.add(kx[k], ky[k], solid);
+        const int edge = arc(m, k, x, y, w, h, r, r + 0.5f, [&](float) { return solid; });
+        const int fade = arc(m, k, x, y, w, h, r, r - 0.5f, [&](float) { return clear; });
+        for (int i = 0; i < kArcSteps; ++i) m.tri(corner, edge + i, edge + i + 1);
+        m.strip(edge, fade, kArcSteps + 1, false);
     }
-    return img;
+    // Glare: alpha falls linearly along (0.6w, 0.6h) and reaches 0 halfway there,
+    // which is the line through the two far points.
+    const float reach = 0.3f * (w * w + h * h);
+    const int o = m.add(x, y, color(kWhite, kGlareAlpha));
+    const int ex = m.add(x + reach / w, y, color(kWhite, 0.0f));
+    const int ey = m.add(x, y + reach / h, color(kWhite, 0.0f));
+    m.tri(o, ex, ey);
 }
 
 void destroy(SDL_Texture*& t) {
@@ -139,14 +200,14 @@ bool Video::init(SDL_Window* window, bool showFps) {
         }
     }
     int w = 0, h = 0;
-    SDL_GetWindowSize(window, &w, &h);
+    if (SDL_GetRendererOutputSize(renderer_, &w, &h) != 0) SDL_GetWindowSize(window, &w, &h);
     screenW_ = screenH_ = 0;
     setScreen(w > 0 ? w : 1280, h > 0 ? h : 720);
     return true;
 }
 
 Video::~Video() {
-    for (SDL_Texture** t : {&tex_, &sharp_, &scan_, &backdrop_, &cover_, &tvBack_, &tvFront_})
+    for (SDL_Texture** t : {&tex_, &sharp_, &scan_, &backdrop_, &cover_, &tvRoom_})
         destroy(*t);
     if (renderer_) SDL_DestroyRenderer(renderer_);
 }
@@ -171,8 +232,7 @@ void Video::setScreen(int w, int h) {
     screenH_ = h;
     destroy(backdrop_);
     backdrop_ = makeTexture(equinoxBackdrop(w / 4, h / 4), SDL_ScaleModeNearest, SDL_BLENDMODE_NONE);
-    destroy(tvBack_);
-    destroy(tvFront_);
+    destroy(tvRoom_);
     tvRect_ = Rect{0, 0, 0, 0};
 }
 
@@ -259,13 +319,29 @@ bool Video::tvFrameShown() const {
     return settings_.size == Size::Original && effectiveBorder(settings_, hasCover()) == Border::Tv;
 }
 
+// The room is a tiny texture made once per screen; the frame is a few hundred vertices
+// remade when the game rectangle moves, so 224/239-line switches cost next to nothing.
 void Video::ensureTv(const Rect& game) {
-    if (tvBack_ && tvFront_ && game == tvRect_) return;
-    destroy(tvBack_);
-    destroy(tvFront_);
+    if (!tvRoom_)
+        tvRoom_ = makeTexture(tvRoom(screenW_, screenH_), SDL_ScaleModeLinear, SDL_BLENDMODE_NONE);
+    if (game == tvRect_) return;
     tvRect_ = game;
-    tvBack_ = makeTexture(tvBack(screenW_, screenH_, game), SDL_ScaleModeNearest, SDL_BLENDMODE_NONE);
-    tvFront_ = makeTexture(tvFront(screenH_, game), SDL_ScaleModeNearest, SDL_BLENDMODE_BLEND);
+    const float s = screenH_ / 720.0f;
+    tvBackV_.clear();
+    tvBackI_.clear();
+    MeshBuilder back{tvBackV_, tvBackI_};
+    tvBackMesh(back, game, s);
+    tvFrontV_.clear();
+    tvFrontI_.clear();
+    MeshBuilder front{tvFrontV_, tvFrontI_};
+    tvFrontMesh(front, game, s);
+}
+
+void Video::drawMesh(const std::vector<SDL_Vertex>& v, const std::vector<int>& idx) {
+    if (v.empty()) return;
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SDL_RenderGeometry(renderer_, nullptr, v.data(), static_cast<int>(v.size()), idx.data(),
+                       static_cast<int>(idx.size()));
 }
 
 void Video::drawBackground(const Rect& game) {
@@ -273,7 +349,8 @@ void Video::drawBackground(const Rect& game) {
     if (tvFrameShown()) {
         if (game.w <= 0) return;
         ensureTv(game);
-        if (tvBack_) SDL_RenderCopy(renderer_, tvBack_, nullptr, nullptr);
+        if (tvRoom_) SDL_RenderCopy(renderer_, tvRoom_, nullptr, nullptr);
+        drawMesh(tvBackV_, tvBackI_);
         return;
     }
     switch (effectiveBorder(settings_, hasCover())) {
@@ -289,13 +366,14 @@ void Video::drawBackground(const Rect& game) {
 void Video::drawFrame(const Rect& game) {
     const SDL_Rect dst = toSdl(game);
     if (settings_.smooth == Smooth::Sharp) {
-        // Enlarge k times with nearest into a target, then the target to the screen with
-        // linear: only the last, fractional step blends neighbours.
-        const unsigned k = static_cast<unsigned>(sharpPrescale(w_, h_, game));
-        if (!sharp_ || sharpW_ != w_ * k || sharpH_ != h_ * k) {
+        // Enlarge by whole factors per axis with nearest into a target, then the target to
+        // the screen with linear: only the last, fractional step blends neighbours.
+        const Prescale k = sharpPrescale(w_, h_, game);
+        const unsigned tw = w_ * static_cast<unsigned>(k.x), th = h_ * static_cast<unsigned>(k.y);
+        if (!sharp_ || sharpW_ != tw || sharpH_ != th) {
             destroy(sharp_);
-            sharpW_ = w_ * k;
-            sharpH_ = h_ * k;
+            sharpW_ = tw;
+            sharpH_ = th;
             sharp_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET,
                                        static_cast<int>(sharpW_), static_cast<int>(sharpH_));
             if (sharp_) {
@@ -337,9 +415,11 @@ void Video::drawGame() {
     if (game.w > 0) {
         drawFrame(game);
         if (settings_.filter == Filter::Scanlines) drawScanlines(game);
-        if (tvFrameShown() && tvFront_) {
-            const SDL_Rect dst = toSdl(game);
-            SDL_RenderCopy(renderer_, tvFront_, nullptr, &dst);
+        if (tvFrameShown()) {
+            const SDL_Rect clip = toSdl(game);
+            SDL_RenderSetClipRect(renderer_, &clip);
+            drawMesh(tvFrontV_, tvFrontI_);
+            SDL_RenderSetClipRect(renderer_, nullptr);
         }
     }
     if (showFps_) drawFps();

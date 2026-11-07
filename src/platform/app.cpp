@@ -6,6 +6,7 @@
 #include <cstring>
 #include <exception>
 #include <memory>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -178,11 +179,15 @@ static void followDock(SDL_Window* window, Video& video, bool& docked) {
     int w = 0, h = 0;
     screenSize(docked, w, h);
     SDL_SetWindowSize(window, w, h);
-    video.setScreen(w, h);
+    // Draw for the size SDL actually renders at, in case it did not follow.
     int ow = 0, oh = 0;
-    SDL_GetRendererOutputSize(video.renderer(), &ow, &oh);
-    std::fprintf(stderr, "%s: screen %dx%d, renderer output %dx%d\n",
-                 docked ? "docked" : "handheld", w, h, ow, oh);
+    if (SDL_GetRendererOutputSize(video.renderer(), &ow, &oh) != 0 || ow <= 0 || oh <= 0) {
+        ow = w;
+        oh = h;
+    }
+    video.setScreen(ow, oh);
+    std::fprintf(stderr, "%s: asked %dx%d, renderer output %dx%d\n", docked ? "docked" : "handheld",
+                 w, h, ow, oh);
 }
 
 static bool fileExists(const std::string& path) {
@@ -377,9 +382,15 @@ static void run(const std::optional<LaunchArgs>& args, bool showFps, SDL_Window*
                     std::fprintf(stderr, "audio init failed; running silent\n");
                 video.setSettings(resolve(loadPrefs(args->video),
                                           loadPrefs(videoPrefsPath(args->saves, args->rom))));
-                // Decoded and blurred once, before the first frame.
-                if (!args->cover.empty())
-                    video.setCover(blurCover(loadPng(args->cover), screenW / 8, screenH / 8));
+                // Decoded and blurred once, before the first frame. Out of memory means no
+                // cover, which falls back to the Equinox border.
+                if (!args->cover.empty()) {
+                    try {
+                        video.setCover(blurCover(loadPng(args->cover), screenW / 8, screenH / 8));
+                    } catch (const std::bad_alloc&) {
+                        std::fprintf(stderr, "cover too large for memory: %s\n", args->cover.c_str());
+                    }
+                }
                 {
                     SramSession session(core, srmPath(args->saves, args->rom));
                     gameLoop(*args, window, docked, video, input, audio, core, view);

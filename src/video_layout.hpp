@@ -15,5 +15,9 @@ unsigned logicalH(unsigned srcH);
 // Where the game sits on the screen, centered. An empty frame gives w == 0.
 Rect gameRect(Size size, unsigned srcW, unsigned srcH, int screenW, int screenH);
 
-// Integer upscale applied before the bilinear pass for Sharp; always >= 1.
-int sharpPrescale(unsigned srcW, unsigned srcH, const Rect& dst);
+// Integer upscale per axis applied before the bilinear pass for Sharp; each >= 1.
+struct Prescale {
+    int x, y;
+    bool operator==(const Prescale&) const = default;
+};
+Prescale sharpPrescale(unsigned srcW, unsigned srcH, const Rect& dst);

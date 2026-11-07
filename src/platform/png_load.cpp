@@ -5,7 +5,7 @@
 #include <cstdio>
 #include <cstring>
 
-Image loadPng(const std::string& path, int maxSide) {
+Image loadPng(const std::string& path, int maxSide, long maxPixels) {
     png_image png;
     std::memset(&png, 0, sizeof png);
     png.version = PNG_IMAGE_VERSION;
@@ -14,7 +14,8 @@ Image loadPng(const std::string& path, int maxSide) {
         return {};
     }
     if (png.width == 0 || png.height == 0 || png.width > static_cast<png_uint_32>(maxSide) ||
-        png.height > static_cast<png_uint_32>(maxSide)) {
+        png.height > static_cast<png_uint_32>(maxSide) ||
+        static_cast<long long>(png.width) * png.height > maxPixels) {
         std::fprintf(stderr, "png %s: %ux%u is out of bounds\n", path.c_str(), png.width, png.height);
         png_image_free(&png);
         return {};

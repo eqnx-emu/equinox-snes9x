@@ -55,7 +55,9 @@ TEST_CASE("zero-sized frame gives an empty rect") {
     CHECK(gameRect(Size::Original, 0, 0, 1280, 720).w == 0);
 }
 
-TEST_CASE("sharp prescale is the integer below the final scale") {
-    CHECK(sharpPrescale(256, 224, Rect{160, 0, 960, 720}) == 3);
-    CHECK(sharpPrescale(256, 224, Rect{0, 0, 1920, 1080}) == 4);
+TEST_CASE("sharp prescale is the integer below the final scale, per axis") {
+    CHECK(sharpPrescale(256, 224, Rect{160, 0, 960, 720}) == Prescale{3, 3});
+    CHECK(sharpPrescale(256, 224, Rect{0, 0, 1920, 1080}) == Prescale{7, 4});
+    CHECK(sharpPrescale(512, 224, Rect{256, 24, 768, 672}) == Prescale{1, 3});
+    CHECK(sharpPrescale(256, 448, Rect{256, 24, 768, 672}) == Prescale{3, 1});
 }

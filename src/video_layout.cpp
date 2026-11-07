@@ -38,9 +38,7 @@ Rect gameRect(Size size, unsigned srcW, unsigned srcH, int screenW, int screenH)
     return Rect{(screenW - w) / 2, (screenH - h) / 2, w, h};
 }
 
-int sharpPrescale(unsigned srcW, unsigned srcH, const Rect& dst) {
-    if (srcW == 0 || srcH == 0) return 1;
-    int kw = dst.w / static_cast<int>(srcW);
-    int kh = dst.h / static_cast<int>(srcH);
-    return std::max(1, std::min(kw, kh));
+Prescale sharpPrescale(unsigned srcW, unsigned srcH, const Rect& dst) {
+    if (srcW == 0 || srcH == 0) return Prescale{1, 1};
+    return Prescale{std::max(1, dst.w / static_cast<int>(srcW)), std::max(1, dst.h / static_cast<int>(srcH))};
 }
