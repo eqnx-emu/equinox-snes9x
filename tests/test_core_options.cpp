@@ -15,3 +15,9 @@ TEST_CASE("other core options are left to the core defaults") {
     CHECK(coreOptionValue("", false) == nullptr);
     CHECK(coreOptionValue(nullptr, true) == nullptr);
 }
+
+TEST_CASE("only the ntsc filter turns the core filter on") {
+    CHECK(ntscFor(Filter::Ntsc) == kNtscEnabled);
+    CHECK_FALSE(ntscFor(Filter::None));
+    CHECK_FALSE(ntscFor(Filter::Scanlines));
+}
