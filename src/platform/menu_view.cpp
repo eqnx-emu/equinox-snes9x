@@ -170,15 +170,15 @@ void MenuView::drawMenu(const Menu& menu, const std::string& gameTitle, Lang lan
     const SDL_Rect all{0, 0, kScreenW, kScreenH};
     SDL_RenderFillRect(r_, &all);
 
-    const int panelH = kPad * 2 + 56 + 4 * kRow;
+    const int panelH = kPad * 2 + 56 + 5 * kRow;
     const int px = (kScreenW - kPanelW) / 2, py = (kScreenH - panelH) / 2;
     fillRound(px, py, kPanelW, panelH, 12, kPanel);
 
     drawText(fit(gameTitle, 26, kPanelW - 2 * kPad), 26, kTitle, px + kPad, py + kPad);
 
-    const Str labels[4] = {Str::Continue, Str::SaveState, Str::LoadState, Str::Exit};
+    const Str labels[5] = {Str::Continue, Str::SaveState, Str::LoadState, Str::Video, Str::Exit};
     int y = py + kPad + 56;
-    for (int i = 0; i < 4; ++i, y += kRow) {
+    for (int i = 0; i < 5; ++i, y += kRow) {
         const bool disabled = i == static_cast<int>(MenuItem::LoadState) && !menu.hasState();
         const bool sel = static_cast<int>(menu.selected()) == i;
         const SDL_Color c = disabled ? kMuted : (sel ? kAmber : kText);

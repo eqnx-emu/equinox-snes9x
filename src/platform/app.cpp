@@ -254,6 +254,7 @@ static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& 
                 case MenuAction::Close: closeMenu(); break;
                 case MenuAction::SaveState: saveState(); break;
                 case MenuAction::LoadState: loadState(); break;
+                case MenuAction::OpenVideo: break;  // wired in Task 7
                 case MenuAction::Exit:
                     g_sram.flush();
                     if (!scheduleReturn(args))

@@ -19,6 +19,8 @@ TEST_CASE("menu down wraps from Exit to Continue") {
     m.down();
     CHECK(m.selected() == MenuItem::LoadState);
     m.down();
+    CHECK(m.selected() == MenuItem::Video);
+    m.down();
     CHECK(m.selected() == MenuItem::Exit);
     m.down();
     CHECK(m.selected() == MenuItem::Continue);
@@ -33,7 +35,7 @@ TEST_CASE("menu load state is skipped when there is no state") {
     m.down();
     CHECK(m.selected() == MenuItem::SaveState);
     m.down();
-    CHECK(m.selected() == MenuItem::Exit);
+    CHECK(m.selected() == MenuItem::Video);
     m.up();
     CHECK(m.selected() == MenuItem::SaveState);
 }
@@ -70,4 +72,14 @@ TEST_CASE("menu ignores input while closed") {
     Menu m;
     CHECK(m.confirm() == MenuAction::None);
     CHECK(m.back() == MenuAction::None);
+}
+
+TEST_CASE("menu confirm on Video opens the video menu") {
+    Menu m;
+    m.open();
+    m.down();
+    m.down();  // SaveState, then Video (no saved state)
+    CHECK(m.selected() == MenuItem::Video);
+    CHECK(m.confirm() == MenuAction::OpenVideo);
+    CHECK(m.isOpen());
 }
