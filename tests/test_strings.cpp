@@ -5,7 +5,7 @@
 #include "doctest/doctest.h"
 
 TEST_CASE("every string has text in both languages") {
-    for (int i = 0; i <= static_cast<int>(Str::BackToEquinox); ++i) {
+    for (int i = 0; i <= static_cast<int>(Str::RomTooBig); ++i) {
         const auto s = static_cast<Str>(i);
         REQUIRE(tr(Lang::PtBR, s) != nullptr);
         REQUIRE(tr(Lang::EnUS, s) != nullptr);

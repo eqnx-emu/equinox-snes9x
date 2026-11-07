@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <exception>
+#include <optional>
 #include <span>
 #include <string>
 #include <variant>
@@ -61,11 +63,14 @@ public:
     void attach(Core* core, std::string path) {
         core_ = core;
         path_ = std::move(path);
-        if (auto saved = readFileWithRecovery(path_)) {
-            auto ram = core_->saveRam();
-            const size_t n = std::min(ram.size(), saved->size());
-            if (n) std::memcpy(ram.data(), saved->data(), n);
-        }
+        auto ram = core_->saveRam();
+        // A candidate of exactly ram.size() bytes wins, so a short file left by a power
+        // cut never beats a complete .bak.
+        if (!ram.empty())
+            if (auto saved = readFileWithRecovery(path_, ram.size())) {
+                const size_t n = std::min(ram.size(), saved->size());
+                std::memcpy(ram.data(), saved->data(), n);
+            }
         lastHash_ = hash(core_->saveRam());
         lastWrite_ = SDL_GetTicks();
     }
@@ -156,8 +161,8 @@ static Str romErrorText(RomError e) {
         case RomError::NotFound: return Str::RomNotFound;
         case RomError::Unreadable: return Str::RomUnreadable;
         case RomError::NoRomInZip: return Str::NoRomInZip;
-        case RomError::Unsupported:
-        case RomError::TooBig: return Str::RomUnsupported;
+        case RomError::Unsupported: return Str::RomUnsupported;
+        case RomError::TooBig: return Str::RomTooBig;
         default: return Str::RomUnreadable;
     }
 }
@@ -250,10 +255,88 @@ static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& 
     g_sram.flush();  // exit: before the scheduled return to Equinox fires
 }
 
+// While the core is attached to the SRAM saver: on every way out of the session,
+// exceptions included, unhook the applet callback, write the SRAM and detach.
+class SramSession {
+public:
+    SramSession(Core& core, const std::string& path) {
+        g_sram.attach(&core, path);
+#ifdef __SWITCH__
+        appletHook(&g_hookCookie, appletHookFn, nullptr);
+#endif
+    }
+    ~SramSession() {
+#ifdef __SWITCH__
+        appletUnhook(&g_hookCookie);
+#endif
+        try {
+            g_sram.flush();
+        } catch (...) {
+        }
+        g_sram.detach();
+    }
+    SramSession(const SramSession&) = delete;
+    SramSession& operator=(const SramSession&) = delete;
+};
+
+static void run(const std::optional<LaunchArgs>& args, bool showFps, SDL_Window*& window) {
+    window = SDL_CreateWindow("Equinox SNES", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 1280,
+                              720, SDL_WINDOW_SHOWN);
+    Video video;
+    Input input;
+    Audio audio;
+    Core core;
+    MenuView view;
+    if (!window || !video.init(window, showFps)) {
+        std::fprintf(stderr, "video init failed\n");
+        return;
+    }
+    input.init();
+    if (!view.init(video.renderer())) std::fprintf(stderr, "menu text unavailable\n");
+
+    if (!args) {
+        showError(video, input, view, Str::OpenFromEquinox, false);
+    } else {
+        auto loaded = loadRom(args->rom);
+        if (auto* err = std::get_if<RomError>(&loaded)) {
+            std::fprintf(stderr, "rom error %d: %s\n", static_cast<int>(*err), args->rom.c_str());
+            showError(video, input, view, romErrorText(*err), true);
+        } else {
+            const Rom& rom = std::get<Rom>(loaded);
+            core.onVideo = [&](const void* px, unsigned w, unsigned h, size_t pitch) {
+                video.upload(px, w, h, pitch);
+            };
+            core.onInput = [&](unsigned port, unsigned id) { return input.state(port, id); };
+            if (!core.load(rom, args->saves, args->rom)) {
+                std::fprintf(stderr, "core failed to load the ROM\n");
+                showError(video, input, view, Str::RomUnsupported, true);
+            } else {
+                if (audio.init(core.sampleRate(), core.fps()))
+                    core.onAudio = [&](const int16_t* lr, size_t frames) { audio.push(lr, frames); };
+                else
+                    std::fprintf(stderr, "audio init failed; running silent\n");
+                {
+                    SramSession session(core, srmPath(args->saves, args->rom));
+                    gameLoop(*args, video, input, audio, core, view);
+                }
+                audio.shutdown();
+                core.unload();
+            }
+        }
+    }
+    view.shutdown();
+    input.shutdown();
+}
+
 int main(int argc, char** argv) {
-    const auto args = parseArgs(argc, argv);
-    // Once launched by Equinox, any exit (menu, error, HOME) reopens it.
-    if (args && !scheduleReturn(*args)) std::fprintf(stderr, "scheduleReturn failed at start\n");
+    std::optional<LaunchArgs> args;
+    try {
+        args = parseArgs(argc, argv);
+        // Once launched by Equinox, any exit (menu, error, HOME, an exception) reopens it.
+        if (args && !scheduleReturn(*args)) std::fprintf(stderr, "scheduleReturn failed at start\n");
+    } catch (...) {
+        std::fprintf(stderr, "could not read the launch arguments\n");
+    }
 
     bool showFps = false;
     for (int i = 1; i < argc; ++i)
@@ -264,58 +347,15 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "SDL_Init failed\n");
         return 0;
     }
-    SDL_Window* window = SDL_CreateWindow("Equinox SNES", SDL_WINDOWPOS_UNDEFINED,
-                                          SDL_WINDOWPOS_UNDEFINED, 1280, 720, SDL_WINDOW_SHOWN);
-    {
-        Video video;
-        Input input;
-        Audio audio;
-        Core core;
-        MenuView view;
-        if (!window || !video.init(window, showFps)) {
-            std::fprintf(stderr, "video init failed\n");
-        } else {
-            input.init();
-            if (!view.init(video.renderer())) std::fprintf(stderr, "menu text unavailable\n");
-
-            if (!args) {
-                showError(video, input, view, Str::OpenFromEquinox, false);
-            } else {
-                auto loaded = loadRom(args->rom);
-                if (auto* err = std::get_if<RomError>(&loaded)) {
-                    std::fprintf(stderr, "rom error %d: %s\n", static_cast<int>(*err), args->rom.c_str());
-                    showError(video, input, view, romErrorText(*err), true);
-                } else {
-                    const Rom& rom = std::get<Rom>(loaded);
-                    core.onVideo = [&](const void* px, unsigned w, unsigned h, size_t pitch) {
-                        video.upload(px, w, h, pitch);
-                    };
-                    core.onInput = [&](unsigned port, unsigned id) { return input.state(port, id); };
-                    if (!core.load(rom, args->saves, args->rom)) {
-                        std::fprintf(stderr, "core failed to load the ROM\n");
-                        showError(video, input, view, Str::RomUnsupported, true);
-                    } else {
-                        if (audio.init(core.sampleRate(), core.fps()))
-                            core.onAudio = [&](const int16_t* lr, size_t frames) { audio.push(lr, frames); };
-                        else
-                            std::fprintf(stderr, "audio init failed; running silent\n");
-                        g_sram.attach(&core, srmPath(args->saves, args->rom));
-#ifdef __SWITCH__
-                        appletHook(&g_hookCookie, appletHookFn, nullptr);
-#endif
-                        gameLoop(*args, video, input, audio, core, view);
-#ifdef __SWITCH__
-                        appletUnhook(&g_hookCookie);
-#endif
-                        g_sram.detach();
-                        audio.shutdown();
-                        core.unload();
-                    }
-                }
-            }
-            view.shutdown();
-            input.shutdown();
-        }
+    SDL_Window* window = nullptr;
+    // No exception may reach std::terminate: that would abort without reopening Equinox.
+    // Unwinding runs SramSession first, so the battery save is written on the way out.
+    try {
+        run(args, showFps, window);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "fatal: %s\n", e.what());
+    } catch (...) {
+        std::fprintf(stderr, "fatal: unknown exception\n");
     }
     if (window) SDL_DestroyWindow(window);
     SDL_Quit();

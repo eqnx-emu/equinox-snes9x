@@ -109,6 +109,43 @@ TEST_CASE("readFile") {
     CHECK_FALSE(readFile((tempDir() / "absent").string()));
 }
 
+// A file of `size` zero bytes, made by extending an empty file (no big buffer in the test).
+static std::string sizedFile(const std::string& name, uintmax_t size) {
+    auto path = writeBytes(name, {});
+    fs::resize_file(fs::path(std::u8string(path.begin(), path.end())), size);
+    return path;
+}
+
+TEST_CASE("zip bigger than 16 MiB is refused before reading") {
+    auto r = loadRom(sizedFile("romset.zip", 16u * 1024 * 1024 + 1));
+    REQUIRE(std::holds_alternative<RomError>(r));
+    CHECK(std::get<RomError>(r) == RomError::TooBig);
+}
+
+TEST_CASE("zip at the 16 MiB cap is read, and garbage is unreadable") {
+    auto r = loadRom(sizedFile("cap.zip", 16u * 1024 * 1024));
+    REQUIRE(std::holds_alternative<RomError>(r));
+    CHECK(std::get<RomError>(r) == RomError::Unreadable);
+}
+
+TEST_CASE("corrupt zip is unreadable") {
+    auto r = loadRom(writeBytes("corrupt.zip", {'P', 'K', 3, 4, 0, 0, 1, 2, 3}));
+    REQUIRE(std::holds_alternative<RomError>(r));
+    CHECK(std::get<RomError>(r) == RomError::Unreadable);
+}
+
+TEST_CASE("plain rom exactly 8 MiB loads") {
+    auto r = loadRom(sizedFile("max.sfc", 8u * 1024 * 1024));
+    REQUIRE(std::holds_alternative<Rom>(r));
+    CHECK(std::get<Rom>(r).data.size() == 8u * 1024 * 1024);
+}
+
+TEST_CASE("huge plain rom is refused without reading it") {
+    auto r = loadRom(sizedFile("romset.smc", 64ull * 1024 * 1024));
+    REQUIRE(std::holds_alternative<RomError>(r));
+    CHECK(std::get<RomError>(r) == RomError::TooBig);
+}
+
 TEST_CASE("cleanup temp dir") {
     std::error_code ec;
     fs::remove_all(tempDir(), ec);

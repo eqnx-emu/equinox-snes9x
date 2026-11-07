@@ -77,3 +77,38 @@ TEST_CASE("recovery read falls back to bak then tmp") {
     { std::ofstream f(t, std::ios::binary); f << "X"; }
     CHECK(readFileWithRecovery(t) == std::vector<uint8_t>{'X'});
 }
+
+TEST_CASE("recovery prefers a .bak of the expected size over a short or empty file") {
+    auto t = u8(dir() / "size.srm");
+    { std::ofstream f(t + ".bak", std::ios::binary); f << "GOOD"; }
+    { std::ofstream f(t, std::ios::binary); f << "GO"; }  // truncated by a power cut
+    CHECK(readFileWithRecovery(t, 4) == std::vector<uint8_t>{'G', 'O', 'O', 'D'});
+    { std::ofstream f(t, std::ios::binary); }  // empty
+    CHECK(readFileWithRecovery(t, 4) == std::vector<uint8_t>{'G', 'O', 'O', 'D'});
+    CHECK(readFileWithRecovery(t) == std::vector<uint8_t>{'G', 'O', 'O', 'D'});  // empty never wins
+}
+
+TEST_CASE("recovery takes a .tmp of the expected size when main and .bak are short") {
+    auto t = u8(dir() / "tmpwins.srm");
+    { std::ofstream f(t, std::ios::binary); f << "A"; }
+    { std::ofstream f(t + ".bak", std::ios::binary); f << "BB"; }
+    { std::ofstream f(t + ".tmp", std::ios::binary); f << "CCC"; }
+    CHECK(readFileWithRecovery(t, 3) == std::vector<uint8_t>{'C', 'C', 'C'});
+}
+
+TEST_CASE("recovery still loads a save of another size when nothing matches") {
+    auto t = u8(dir() / "other.srm");
+    { std::ofstream f(t, std::ios::binary); f << "12345678"; }  // e.g. imported, padded
+    CHECK(readFileWithRecovery(t, 4) == std::vector<uint8_t>{'1', '2', '3', '4', '5', '6', '7', '8'});
+}
+
+TEST_CASE("atomic write of large data round-trips") {
+    std::vector<uint8_t> big(300 * 1024);
+    for (size_t i = 0; i < big.size(); ++i) big[i] = static_cast<uint8_t>(i * 31);
+    auto p = u8(dir() / "big.bin");
+    REQUIRE(writeFileAtomic(p, big));
+    CHECK(readFile(p) == big);
+    CHECK(fileSize(p) == big.size());
+    CHECK_FALSE(fileSize(u8(dir() / "missing.bin")).has_value());
+    CHECK_FALSE(fileSize(u8(dir())).has_value());  // a folder is not a file
+}

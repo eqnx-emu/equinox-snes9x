@@ -6,10 +6,13 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <new>
 
 namespace {
 
 constexpr size_t kMaxRomBytes = 8u * 1024 * 1024;
+// One compressed SNES ROM is at most ~6 MiB; anything bigger is a romset or not a ROM.
+constexpr uint64_t kMaxZipBytes = 16u * 1024 * 1024;
 
 std::string extensionOf(const std::string& name) {
     auto dot = name.find_last_of('.');
@@ -38,7 +41,12 @@ std::variant<Rom, RomError> loadFromZip(const std::vector<uint8_t>& zipData) {
         }
         Rom rom;
         rom.innerName = name;
-        rom.data.resize(static_cast<size_t>(st.m_uncomp_size));
+        try {
+            rom.data.resize(static_cast<size_t>(st.m_uncomp_size));
+        } catch (const std::bad_alloc&) {
+            result = RomError::TooBig;
+            break;
+        }
         if (!mz_zip_reader_extract_to_mem(&zip, i, rom.data.data(), rom.data.size(), 0)) {
             result = RomError::Unreadable;
             break;
@@ -57,16 +65,22 @@ std::variant<Rom, RomError> loadRom(const std::string& path) {
     const bool zip = ext == ".zip";
     if (!zip && !isRomExt(ext)) return RomError::Unsupported;
 
-    auto bytes = readFile(path);
-    if (!bytes) {
+    // Check the size before reading, so a romset zip of hundreds of MB is refused at once.
+    const auto size = fileSize(path);
+    if (!size) {
         // Distinguish a missing file from one that exists but can't be read.
         std::error_code ec;
         const bool exists = std::filesystem::exists(std::filesystem::path(std::u8string(path.begin(), path.end())), ec);
         return exists ? RomError::Unreadable : RomError::NotFound;
     }
+    if (*size > (zip ? kMaxZipBytes : kMaxRomBytes)) return RomError::TooBig;
+
+    auto bytes = readFile(path);
+    if (!bytes) return RomError::Unreadable;
     if (!zip) {
-        if (bytes->size() > kMaxRomBytes) return RomError::TooBig;
+        if (bytes->size() > kMaxRomBytes) return RomError::TooBig;  // grew since the size check
         return Rom{std::move(*bytes), {}};
     }
+    if (bytes->size() > kMaxZipBytes) return RomError::TooBig;
     return loadFromZip(*bytes);
 }

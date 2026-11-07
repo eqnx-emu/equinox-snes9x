@@ -22,6 +22,7 @@ constexpr Pair kTable[] = {
     {"Nenhuma ROM de SNES dentro do zip", "No SNES ROM inside the zip"},
     {"ROM n\xC3\xA3o suportada", "Unsupported ROM"},
     {"Voltar ao Equinox", "Back to Equinox"},
+    {"Arquivo grande demais para uma ROM de SNES", "File too big for a SNES ROM"},
 };
 }  // namespace
 

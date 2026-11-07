@@ -13,6 +13,7 @@ struct Rom {
 };
 
 // .sfc/.smc are read whole; for .zip the first .sfc/.smc entry in central-directory order.
-// Limit: 8 MiB (the largest SNES ROM is about 6 MiB). The 512-byte copier header is left
+// Limits, checked before reading: 8 MiB for the ROM (the largest SNES ROM is about 6 MiB)
+// and 16 MiB for a zip; bigger gives TooBig. The 512-byte copier header is left
 // for Snes9x to handle.
 std::variant<Rom, RomError> loadRom(const std::string& path);
