@@ -27,6 +27,8 @@
 
 #ifdef __SWITCH__
 #include <switch.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 #endif
 
 // Bottom-of-screen message. Save failures are debounced: the SRAM saver retries every
@@ -350,6 +352,13 @@ static void run(const std::optional<LaunchArgs>& args, bool showFps, SDL_Window*
 }
 
 int main(int argc, char** argv) {
+    // Under nxlink (development only), send stdout/stderr to the PC running `nxlink -s`.
+    int nxlinkSock = -1;
+    if (__nxlink_host.s_addr != 0 && R_SUCCEEDED(socketInitializeDefault())) {
+        nxlinkSock = nxlinkStdio();
+        if (nxlinkSock < 0) socketExit();
+    }
+
     std::optional<LaunchArgs> args;
     try {
         args = parseArgs(argc, argv);
@@ -380,5 +389,9 @@ int main(int argc, char** argv) {
     }
     if (window) SDL_DestroyWindow(window);
     SDL_Quit();
+    if (nxlinkSock >= 0) {
+        close(nxlinkSock);
+        socketExit();
+    }
     return 0;
 }
