@@ -25,7 +25,12 @@ Image loadPng(const std::string& path, int maxSide, long maxPixels) {
     Image img;
     img.w = static_cast<int>(png.width);
     img.h = static_cast<int>(png.height);
-    img.px.resize(static_cast<size_t>(img.w) * img.h);
+    try {
+        img.px.resize(static_cast<size_t>(img.w) * img.h);
+    } catch (...) {
+        png_image_free(&png);  // closes the file; the caller handles the bad_alloc
+        throw;
+    }
     if (!png_image_finish_read(&png, nullptr, img.px.data(), 0, nullptr)) {
         std::fprintf(stderr, "png %s: %s\n", path.c_str(), png.message);
         png_image_free(&png);

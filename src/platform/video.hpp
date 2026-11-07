@@ -62,6 +62,7 @@ private:
     std::vector<SDL_Vertex> tvBackV_, tvFrontV_;
     std::vector<int> tvBackI_, tvFrontI_;
     Rect tvRect_{0, 0, 0, 0};
+    bool tvRoomFailed_ = false;
 
     bool showFps_ = false;
     bool native565_ = true;

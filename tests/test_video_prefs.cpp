@@ -89,17 +89,39 @@ TEST_CASE("resolve: game over global over spec defaults") {
     CHECK(s.filter == Filter::None);
 }
 
-TEST_CASE("overridesFor keeps only differences") {
+TEST_CASE("updateOverrides stores a change that differs from the global") {
     VideoSettings g;
     g.border = Border::Cover;
     VideoSettings e = g;
     e.filter = Filter::Scanlines;
-    auto o = overridesFor(g, e);
+    auto o = updateOverrides({}, g, e);
     CHECK(o.filter == Filter::Scanlines);
     CHECK(!o.size);
     CHECK(!o.smooth);
     CHECK(!o.border);
-    CHECK(overridesFor(g, g).empty());
+    CHECK(updateOverrides({}, g, g).empty());
+}
+
+TEST_CASE("updateOverrides keeps an untouched choice that now equals the global") {
+    VideoPrefs stored;
+    stored.size = Size::Aspect43;
+    VideoSettings g;
+    g.size = Size::Aspect43;  // the global default moved to the game's choice
+    VideoSettings e = g;
+    e.smooth = Smooth::Sharp;  // the player only changes smoothing
+    auto o = updateOverrides(stored, g, e);
+    CHECK(o.size == Size::Aspect43);
+    CHECK(o.smooth == Smooth::Sharp);
+    g.size = Size::Original;  // the global moves back: the game stays 4:3
+    CHECK(resolve(VideoPrefs{.size = g.size}, o).size == Size::Aspect43);
+}
+
+TEST_CASE("updateOverrides drops a changed option set back to the global") {
+    VideoPrefs stored;
+    stored.border = Border::Black;
+    VideoSettings g;
+    VideoSettings e = g;  // border changed from black back to the global equinox
+    CHECK(updateOverrides(stored, g, e).empty());
 }
 
 TEST_CASE("cover border without cover falls back to equinox") {
@@ -164,6 +186,17 @@ TEST_CASE("savePrefs under a parent that is a file returns false") {
     VideoPrefs p;
     p.size = Size::Full;
     CHECK_FALSE(savePrefs(u8(blocker / "c.video.json"), p));
+}
+
+TEST_CASE("loadPrefs recovers an interrupted save and an empty save clears it") {
+    const std::string path = u8(prefsDir() / "r.video.json");
+    {
+        std::ofstream(prefsDir() / "r.video.json.bak") << R"({"size":"4:3"})";
+    }
+    CHECK(loadPrefs(path).size == Size::Aspect43);
+    REQUIRE(savePrefs(path, VideoPrefs{}));
+    CHECK(loadPrefs(path).empty());
+    CHECK_FALSE(fs::exists(prefsDir() / "r.video.json.bak"));
 }
 
 TEST_CASE("loadPrefs of a missing file is empty") {

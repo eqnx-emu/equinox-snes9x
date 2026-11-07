@@ -69,8 +69,10 @@ stripped from the values.
 The pause menu has a "Vídeo" item. The global defaults come from the `--video` file;
 each game keeps its own overrides in `<saves>/<ROM stem>.video.json`, named after the
 ROM file name without its extension (`Chrono Trigger.sfc` gives
-`Chrono Trigger.video.json`), written by the runner with only the keys that differ from
-the global default. Both files are JSON objects; unknown keys are ignored, and a missing
+`Chrono Trigger.video.json`), written by the runner with the options changed in that
+game. An option changed back to the global default is dropped from the file; an option
+not touched in the game keeps its value even if the global default later matches it.
+The `tv` border only shows around `original`. Both files are JSON objects; unknown keys are ignored, and a missing
 key or unknown value follows the default (the value marked default, the first of each
 row).
 

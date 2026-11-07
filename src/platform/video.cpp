@@ -233,11 +233,16 @@ void Video::setScreen(int w, int h) {
     destroy(backdrop_);
     backdrop_ = makeTexture(equinoxBackdrop(w / 4, h / 4), SDL_ScaleModeNearest, SDL_BLENDMODE_NONE);
     destroy(tvRoom_);
+    tvRoomFailed_ = false;
     tvRect_ = Rect{0, 0, 0, 0};
 }
 
 void Video::setSettings(const VideoSettings& settings) {
     settings_ = settings;
+    if (settings_.smooth != Smooth::Sharp) {  // the prescale target is only for Sharp
+        destroy(sharp_);
+        sharpW_ = sharpH_ = 0;
+    }
     applyGameScaleMode();
 }
 
@@ -322,8 +327,10 @@ bool Video::tvFrameShown() const {
 // The room is a tiny texture made once per screen; the frame is a few hundred vertices
 // remade when the game rectangle moves, so 224/239-line switches cost next to nothing.
 void Video::ensureTv(const Rect& game) {
-    if (!tvRoom_)
+    if (!tvRoom_ && !tvRoomFailed_) {
         tvRoom_ = makeTexture(tvRoom(screenW_, screenH_), SDL_ScaleModeLinear, SDL_BLENDMODE_NONE);
+        tvRoomFailed_ = !tvRoom_;  // retried only for a new screen size
+    }
     if (game == tvRect_) return;
     tvRect_ = game;
     const float s = screenH_ / 720.0f;
@@ -370,7 +377,7 @@ void Video::drawFrame(const Rect& game) {
         // the screen with linear: only the last, fractional step blends neighbours.
         const Prescale k = sharpPrescale(w_, h_, game);
         const unsigned tw = w_ * static_cast<unsigned>(k.x), th = h_ * static_cast<unsigned>(k.y);
-        if (!sharp_ || sharpW_ != tw || sharpH_ != th) {
+        if (sharpW_ != tw || sharpH_ != th) {  // a failed size is not retried every frame
             destroy(sharp_);
             sharpW_ = tw;
             sharpH_ = th;
@@ -396,7 +403,7 @@ void Video::drawFrame(const Rect& game) {
 
 void Video::drawScanlines(const Rect& game) {
     const unsigned rows = logicalH(h_);
-    if (!scan_ || rows != scanRows_) {
+    if (rows != scanRows_) {  // a failed mask is not retried every frame
         destroy(scan_);
         scanRows_ = rows;
         scan_ = makeTexture(scanlineMask(rows), SDL_ScaleModeNearest, SDL_BLENDMODE_BLEND);

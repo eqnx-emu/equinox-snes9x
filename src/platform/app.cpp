@@ -239,7 +239,7 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
     Menu menu;
     bool running = true;
 
-    // The game file keeps only what differs from the global default.
+    // The game file keeps the options changed in this game (see updateOverrides).
     const VideoPrefs globalPrefs = loadPrefs(args.video);  // empty without --video
     const VideoSettings globalSettings = resolve(globalPrefs, {});
     const std::string videoFile = videoPrefsPath(args.saves, args.rom);
@@ -264,7 +264,8 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
         core.setNtsc(ntscFor(s.filter));
         if (ntscChanged && menu.isOpen()) refreshPausedFrame();
     };
-    applyVideo(resolve(globalPrefs, loadPrefs(videoFile)));
+    VideoPrefs gamePrefs = loadPrefs(videoFile);
+    applyVideo(resolve(globalPrefs, gamePrefs));
     std::optional<VideoMenu> videoMenu;  // open over the paused game, from the pause menu
 
     auto openMenu = [&] {
@@ -301,7 +302,11 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
 
     // The game file is written when the video menu closes, or on the way out while it is open.
     auto saveVideoPrefs = [&] {
-        if (savePrefs(videoFile, overridesFor(globalSettings, videoMenu->settings()))) return true;
+        const VideoPrefs next = updateOverrides(gamePrefs, globalSettings, videoMenu->settings());
+        if (savePrefs(videoFile, next)) {
+            gamePrefs = next;
+            return true;
+        }
         std::fprintf(stderr, "could not save %s\n", videoFile.c_str());
         return false;
     };
@@ -313,11 +318,13 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
         VideoAction act = VideoAction::None;
         if (edges.confirm) act = vm.confirm();
         else if (edges.back) act = vm.back();
+        else if (edges.up || edges.down) {}  // a diagonal push only moves the cursor
         else if (edges.left) act = vm.change(-1);
         else if (edges.right) act = vm.change(1);
         switch (act) {
             case VideoAction::Changed: applyVideo(vm.settings()); break;
             case VideoAction::UseDefault:
+                gamePrefs = {};  // the game follows the global default again
                 vm.reset(globalSettings);
                 applyVideo(vm.settings());
                 break;
@@ -337,7 +344,10 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) running = false;
             if (e.type == SDL_APP_WILLENTERBACKGROUND || e.type == SDL_APP_TERMINATING) g_sram.flush();
-            if (e.type == SDL_APP_TERMINATING && videoMenu) saveVideoPrefs();
+            if (e.type == SDL_APP_TERMINATING && videoMenu) {
+                saveVideoPrefs();
+                videoMenu.reset();  // saved once; the exit path must not write it again
+            }
             if (e.type == SDL_FINGERDOWN) touched = true;
             input.handleEvent(e);
         }

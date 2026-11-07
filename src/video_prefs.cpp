@@ -189,8 +189,10 @@ const char* idOf(const Entry<E> (&table)[N], E value) {
 }
 
 template <typename T>
-void diff(std::optional<T>& out, T global, T effective) {
-    if (effective != global) out = effective;
+void update(std::optional<T>& stored, T global, T effective) {
+    if (effective == stored.value_or(global)) return;  // untouched: kept as it was
+    if (effective == global) stored.reset();
+    else stored = effective;
 }
 
 // Sets the named key; a value that is not a known string leaves it absent.
@@ -263,13 +265,13 @@ VideoSettings resolve(const VideoPrefs& global, const VideoPrefs& game) {
     return s;
 }
 
-VideoPrefs overridesFor(const VideoSettings& global, const VideoSettings& effective) {
-    VideoPrefs o;
-    diff(o.size, global.size, effective.size);
-    diff(o.smooth, global.smooth, effective.smooth);
-    diff(o.filter, global.filter, effective.filter);
-    diff(o.border, global.border, effective.border);
-    return o;
+VideoPrefs updateOverrides(VideoPrefs stored, const VideoSettings& global,
+                           const VideoSettings& effective) {
+    update(stored.size, global.size, effective.size);
+    update(stored.smooth, global.smooth, effective.smooth);
+    update(stored.filter, global.filter, effective.filter);
+    update(stored.border, global.border, effective.border);
+    return stored;
 }
 
 Border effectiveBorder(const VideoSettings& settings, bool hasCover) {
@@ -283,7 +285,7 @@ const char* toId(Filter v) { return idOf(kFilters, v); }
 const char* toId(Border v) { return idOf(kBorders, v); }
 
 VideoPrefs loadPrefs(const std::string& path) {
-    const auto bytes = readFile(path);
+    const auto bytes = readFileWithRecovery(path);  // an interrupted save leaves .bak/.tmp
     if (!bytes) return {};
     return parsePrefs(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));
 }
@@ -294,7 +296,14 @@ bool savePrefs(const std::string& path, const VideoPrefs& prefs) {
         std::error_code ec;
         const fs::path p(std::u8string(path.begin(), path.end()));
         fs::remove(p, ec);
-        return !ec;
+        if (ec) return false;
+        // Leftovers of an interrupted save would otherwise be read back by loadPrefs.
+        for (const char* suffix : {".bak", ".tmp"}) {
+            const std::string side = path + suffix;
+            fs::remove(fs::path(std::u8string(side.begin(), side.end())), ec);
+            if (ec) return false;
+        }
+        return true;
     }
     const std::string json = serializePrefs(prefs);
     return writeFileAtomic(path, std::span<const uint8_t>(reinterpret_cast<const uint8_t*>(json.data()), json.size()));

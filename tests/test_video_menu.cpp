@@ -79,6 +79,28 @@ TEST_CASE("filter reaches ntsc when allowed") {
     CHECK(m.settings().filter == Filter::None);
 }
 
+TEST_CASE("tv border is offered only in original") {
+    VideoSettings s;
+    s.size = Size::Aspect43;
+    s.border = Border::Cover;
+    VideoMenu m(s);
+    m.moveCursor(1);
+    m.moveCursor(1);
+    m.moveCursor(1);
+    REQUIRE(m.cursor() == VideoRow::Border);
+    m.change(1);
+    CHECK(m.settings().border == Border::Black);  // skips tv
+    m.change(-1);
+    CHECK(m.settings().border == Border::Cover);
+    VideoMenu o(VideoSettings{});  // original
+    o.moveCursor(1);
+    o.moveCursor(1);
+    o.moveCursor(1);
+    o.change(1);
+    o.change(1);
+    CHECK(o.settings().border == Border::Tv);
+}
+
 TEST_CASE("smooth and border cycle") {
     VideoMenu m(VideoSettings{});
     m.moveCursor(1);

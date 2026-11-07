@@ -37,15 +37,19 @@ struct VideoSettings {
 VideoPrefs parsePrefs(std::string_view json);
 std::string serializePrefs(const VideoPrefs& prefs);
 
-// A missing or unreadable file is empty prefs.
+// A missing or unreadable file is empty prefs; a .bak or .tmp left by an interrupted
+// save is read when the file itself is gone.
 VideoPrefs loadPrefs(const std::string& path);
-// Empty prefs delete the file. Returns false on failure; never throws.
+// Empty prefs delete the file and any .bak/.tmp beside it. Returns false on failure; never throws.
 bool savePrefs(const std::string& path, const VideoPrefs& prefs);
 
 // Game over global over the spec defaults.
 VideoSettings resolve(const VideoPrefs& global, const VideoPrefs& game);
-// Only the keys of `effective` that differ from `global`.
-VideoPrefs overridesFor(const VideoSettings& global, const VideoSettings& effective);
+// The game file after the player picked `effective`. Options the player did not change
+// keep their stored value, even when it now equals the global default; a changed option
+// is stored only when it differs from `global`.
+VideoPrefs updateOverrides(VideoPrefs stored, const VideoSettings& global,
+                           const VideoSettings& effective);
 
 // A cover border without a cover falls back to the Equinox frame.
 Border effectiveBorder(const VideoSettings& settings, bool hasCover);

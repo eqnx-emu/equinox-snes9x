@@ -27,7 +27,11 @@ VideoAction VideoMenu::change(int dir) {
             s_.filter = step(s_.filter, dir, 3);
             if (s_.filter == Filter::Ntsc && !ntscAllowed_) s_.filter = step(s_.filter, dir, 3);
             return VideoAction::Changed;
-        case VideoRow::Border: s_.border = step(s_.border, dir, 4); return VideoAction::Changed;
+        case VideoRow::Border:
+            s_.border = step(s_.border, dir, 4);
+            // The TV frame only fits around Original; elsewhere it would draw black sides.
+            if (s_.border == Border::Tv && s_.size != Size::Original) s_.border = step(s_.border, dir, 4);
+            return VideoAction::Changed;
         case VideoRow::UseDefault:
         case VideoRow::Back: break;
     }
