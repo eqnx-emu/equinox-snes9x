@@ -178,6 +178,7 @@ static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& 
     auto closeMenu = [&] {
         menu.close();
         audio.pause(false);
+        input.suppressHeld();  // the closing A/B must not reach the game
         g_sram.flush();  // menu exit is one of the SRAM flush triggers
     };
     auto saveState = [&] {
@@ -187,7 +188,7 @@ static void gameLoop(const LaunchArgs& args, Video& video, Input& input, Audio& 
             g_toasts.show(tr(g_lang, Str::StateSaved));
         } else {
             std::fprintf(stderr, "could not write state %s\n", stateFile.c_str());
-            g_toasts.saveFailed(g_lang);
+            g_toasts.show(tr(g_lang, Str::SaveFailed));  // user action: always report
         }
     };
     auto loadState = [&] {

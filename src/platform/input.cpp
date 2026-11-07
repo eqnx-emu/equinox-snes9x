@@ -63,7 +63,21 @@ void Input::handleEvent(const SDL_Event& e) {
     }
 }
 
-int16_t Input::state(unsigned port, unsigned id) const {
+int16_t Input::state(unsigned port, unsigned id) {
+    const bool held = rawState(port, id) != 0;
+    return port > 1 || id > 15 ? held : release_[port].filter(id, held);
+}
+
+void Input::suppressHeld() {
+    for (unsigned port = 0; port < 2; ++port) {
+        uint32_t mask = 0;
+        for (unsigned id = 0; id < 16; ++id)
+            if (rawState(port, id)) mask |= 1u << id;
+        release_[port].suppress(mask);
+    }
+}
+
+int16_t Input::rawState(unsigned port, unsigned id) const {
     if (port > 1 || !pads_[port]) return 0;
     SDL_Joystick* j = pads_[port];
     auto btn = [&](int b) { return SDL_JoystickGetButton(j, b) != 0; };
