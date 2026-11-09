@@ -22,9 +22,9 @@ public:
     // The renderer's output height; call before drawing (cheap when unchanged).
     void setScreenHeight(int h);
 
-    // Dims the frame already drawn and draws the panel.
+    // Dims the frame already drawn and draws the sheet on the right.
     void drawMenu(const Menu& menu, const std::string& gameTitle, Lang lang);
-    // Panel on the left, without dimming, so the change shows beside it.
+    // The same sheet without dimming, so the change shows beside it.
     void drawVideoMenu(const VideoMenu& menu, Lang lang);
     // Bottom-of-screen message.
     void drawToast(const std::string& text);
@@ -56,7 +56,12 @@ private:
     std::string fit(const std::string& s, int px, int maxW);
     void fillRound(int x, int y, int w, int h, int r, SDL_Color c);
     void badgeA(int cx, int cy, int r);
+    // The sheet's left edge for this frame: it slides in from the right when
+    // no sheet was drawn just before.
+    int sheetLeft(int width);
+    void drawIcon(MenuItem icon, int cx, int cy, int size, SDL_Color c);
 
+    Uint32 sheetOpenedAt_ = 0, sheetDrawnAt_ = 0;
     SDL_Renderer* r_ = nullptr;
     float scale_ = 1.0f;
     bool ttf_ = false;
