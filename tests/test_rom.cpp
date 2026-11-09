@@ -3,6 +3,7 @@
 
 #include "doctest/doctest.h"
 #include "miniz/miniz.h"
+#include "sevenz_fixtures.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -144,6 +145,25 @@ TEST_CASE("huge plain rom is refused without reading it") {
     auto r = loadRom(sizedFile("romset.smc", 64ull * 1024 * 1024));
     REQUIRE(std::holds_alternative<RomError>(r));
     CHECK(std::get<RomError>(r) == RomError::TooBig);
+}
+
+TEST_CASE("loads the first rom inside a 7z") {
+    auto r = loadRom(writeBytes("pack.7z", kSevenZipRom));
+    REQUIRE(std::holds_alternative<Rom>(r));
+    CHECK(std::get<Rom>(r).data == romFixture());
+    CHECK(std::get<Rom>(r).innerName == "Game.sfc");
+}
+
+TEST_CASE("7z without a rom is reported as such") {
+    auto r = loadRom(writeBytes("norom.7z", kSevenZipNoRom));
+    REQUIRE(std::holds_alternative<RomError>(r));
+    CHECK(std::get<RomError>(r) == RomError::NoRomInZip);
+}
+
+TEST_CASE("damaged 7z is unreadable") {
+    auto r = loadRom(writeBytes("bad.7z", std::vector<uint8_t>(64, 0x37)));
+    REQUIRE(std::holds_alternative<RomError>(r));
+    CHECK(std::get<RomError>(r) == RomError::Unreadable);
 }
 
 TEST_CASE("cleanup temp dir") {

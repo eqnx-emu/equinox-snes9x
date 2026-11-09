@@ -2,6 +2,7 @@
 
 #include "file_io.hpp"
 #include "miniz/miniz.h"
+#include "sevenz.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -13,6 +14,8 @@ namespace {
 constexpr size_t kMaxRomBytes = 8u * 1024 * 1024;
 // One compressed SNES ROM is at most ~6 MiB; anything bigger is a romset or not a ROM.
 constexpr uint64_t kMaxZipBytes = 16u * 1024 * 1024;
+// A solid .7z must be unpacked up to the ROM, so this also bounds what a pack can ask for.
+constexpr uint64_t kMax7zBlockBytes = 32u * 1024 * 1024;
 
 std::string extensionOf(const std::string& name) {
     auto dot = name.find_last_of('.');
@@ -58,11 +61,29 @@ std::variant<Rom, RomError> loadFromZip(const std::vector<uint8_t>& zipData) {
     return result;
 }
 
+std::variant<Rom, RomError> loadFrom7z(const std::vector<uint8_t>& archive) {
+    sevenz::Found found;
+    const auto isRom = [](const std::string& name) { return isRomExt(extensionOf(name)); };
+    switch (sevenz::firstMatching(archive.data(), archive.size(), isRom, kMaxRomBytes, kMax7zBlockBytes,
+                                  true, found)) {
+    case sevenz::Status::Ok:
+        return Rom{std::move(found.bytes), std::move(found.name)};
+    case sevenz::Status::NoMatch:
+        return RomError::NoRomInZip;
+    case sevenz::Status::TooBig:
+        return RomError::TooBig;
+    case sevenz::Status::Damaged:
+        break;
+    }
+    return RomError::Unreadable;
+}
+
 }  // namespace
 
 std::variant<Rom, RomError> loadRom(const std::string& path) {
     const std::string ext = extensionOf(path);
-    const bool zip = ext == ".zip";
+    const bool sevenZip = ext == ".7z";
+    const bool zip = ext == ".zip" || sevenZip;
     if (!zip && !isRomExt(ext)) return RomError::Unsupported;
 
     // Check the size before reading, so a romset zip of hundreds of MB is refused at once.
@@ -82,5 +103,5 @@ std::variant<Rom, RomError> loadRom(const std::string& path) {
         return Rom{std::move(*bytes), {}};
     }
     if (bytes->size() > kMaxZipBytes) return RomError::TooBig;
-    return loadFromZip(*bytes);
+    return sevenZip ? loadFrom7z(*bytes) : loadFromZip(*bytes);
 }
