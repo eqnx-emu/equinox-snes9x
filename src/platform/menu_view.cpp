@@ -1,62 +1,73 @@
 #include "platform/menu_view.hpp"
 
+#include "menu_text.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 
 #ifdef __SWITCH__
 #include <switch.h>
 #endif
 
 namespace {
-constexpr SDL_Color kPanel{0x17, 0x1c, 0x28, 255};
+constexpr SDL_Color kPanel{0x14, 0x1a, 0x29, 255};
+constexpr SDL_Color kLine{0x2a, 0x33, 0x50, 255};
+constexpr SDL_Color kCard{0x1b, 0x22, 0x34, 255};
 constexpr SDL_Color kAmber{0xf5, 0xb5, 0x44, 255};
-constexpr SDL_Color kAmberSoft{0xf5, 0xb5, 0x44, 40};
+constexpr SDL_Color kAmberSoft{0xf5, 0xb5, 0x44, 36};
 constexpr SDL_Color kText{0xe8, 0xeb, 0xf2, 255};
-constexpr SDL_Color kMuted{0x5b, 0x64, 0x78, 255};
-constexpr SDL_Color kTitle{0x9a, 0xa3, 0xb8, 255};
+constexpr SDL_Color kSecondary{0x9a, 0xa3, 0xb8, 255};
+constexpr SDL_Color kDisabled{0x6b, 0x74, 0x88, 255};
+constexpr SDL_Color kDesc{0xc9, 0xcf, 0xdc, 255};
+constexpr SDL_Color kDot{0x4a, 0x54, 0x70, 255};
+constexpr SDL_Color kSegment{0x0e, 0x13, 0x20, 255};
 constexpr int kScreenW = 1280, kScreenH = 720;
-constexpr int kPanelW = 560, kRow = 68, kPad = 28;
-constexpr int kMenuW = 460, kSheetTop = 40, kIconPx = 32;
+constexpr int kPauseW = 480, kVideoW = 560, kPad = 32;
 constexpr Uint32 kSlideMs = 180;
 
-bool inBox(float u, float v, float x0, float y0, float x1, float y1) {
-    return u >= x0 && u <= x1 && v >= y0 && v <= y1;
-}
+struct Seg {
+    float x0, y0, x1, y1;
+};
 
-bool inTri(float u, float v, float ax, float ay, float bx, float by, float cx, float cy) {
-    const auto side = [&](float x0, float y0, float x1, float y1) {
-        return (x1 - x0) * (v - y0) - (y1 - y0) * (u - x0);
-    };
-    const float a = side(ax, ay, bx, by), b = side(bx, by, cx, cy), c = side(cx, cy, ax, ay);
-    return (a >= 0 && b >= 0 && c >= 0) || (a <= 0 && b <= 0 && c <= 0);
-}
+// Icons are 2-unit strokes on a 24-unit grid, the way line icons are drawn.
+constexpr Seg kPlay[] = {{7, 4.5f, 7, 19.5f}, {7, 19.5f, 19, 12}, {19, 12, 7, 4.5f}};
+constexpr Seg kSave[] = {{12, 3, 12, 14}, {7.5f, 9.5f, 12, 14}, {12, 14, 16.5f, 9.5f},
+                         {4, 15, 4, 19}, {4, 19, 20, 19}, {20, 19, 20, 15}};
+constexpr Seg kLoad[] = {{12, 14, 12, 3}, {7.5f, 7.5f, 12, 3}, {12, 3, 16.5f, 7.5f},
+                         {4, 15, 4, 19}, {4, 19, 20, 19}, {20, 19, 20, 15}};
+constexpr Seg kScreen[] = {{3, 4, 21, 4}, {21, 4, 21, 16}, {21, 16, 3, 16}, {3, 16, 3, 4},
+                           {9, 20, 15, 20}, {12, 16, 12, 20}};
+constexpr Seg kExit[] = {{14, 4, 5, 4}, {5, 4, 5, 20}, {5, 20, 14, 20}, {10, 12, 20, 12},
+                         {16.5f, 8.5f, 20, 12}, {20, 12, 16.5f, 15.5f}};
 
-bool inTray(float u, float v) {
-    return inBox(u, v, -.8f, .4f, -.6f, .8f) || inBox(u, v, .6f, .4f, .8f, .8f) ||
-           inBox(u, v, -.8f, .6f, .8f, .8f);
-}
-
-// Whether a point of the icon is filled; u and v go from -1 to 1, v down.
-bool iconCovers(MenuItem icon, float u, float v) {
+std::pair<const Seg*, size_t> segments(MenuItem icon) {
     switch (icon) {
-        case MenuItem::Continue:
-            return inTri(u, v, -.55f, -.75f, -.55f, .75f, .8f, 0);
-        case MenuItem::SaveState:  // an arrow into a tray
-            return inTray(u, v) || inBox(u, v, -.13f, -.85f, .13f, .05f) ||
-                   inTri(u, v, -.5f, 0, .5f, 0, 0, .5f);
-        case MenuItem::LoadState:  // an arrow out of it
-            return inTray(u, v) || inBox(u, v, -.13f, -.3f, .13f, .4f) ||
-                   inTri(u, v, -.5f, -.25f, .5f, -.25f, 0, -.85f);
-        case MenuItem::Video:  // a screen on a stand
-            return (inBox(u, v, -.9f, -.75f, .9f, .45f) && !inBox(u, v, -.72f, -.57f, .72f, .27f)) ||
-                   inBox(u, v, -.12f, .45f, .12f, .65f) || inBox(u, v, -.45f, .62f, .45f, .8f);
-        case MenuItem::Exit:  // an arrow out of a door
-            return inBox(u, v, -.85f, -.85f, -.65f, .85f) || inBox(u, v, -.85f, -.85f, -.05f, -.65f) ||
-                   inBox(u, v, -.85f, .65f, -.05f, .85f) || inBox(u, v, -.3f, -.12f, .4f, .12f) ||
-                   inTri(u, v, .3f, -.5f, .3f, .5f, .9f, 0);
+        case MenuItem::Continue: return {kPlay, std::size(kPlay)};
+        case MenuItem::SaveState: return {kSave, std::size(kSave)};
+        case MenuItem::LoadState: return {kLoad, std::size(kLoad)};
+        case MenuItem::Video: return {kScreen, std::size(kScreen)};
+        case MenuItem::Exit: return {kExit, std::size(kExit)};
     }
+    return {kPlay, 0};
+}
+
+float distToSeg(float x, float y, const Seg& s) {
+    const float dx = s.x1 - s.x0, dy = s.y1 - s.y0;
+    const float len2 = dx * dx + dy * dy;
+    float t = len2 > 0 ? ((x - s.x0) * dx + (y - s.y0) * dy) / len2 : 0;
+    t = std::clamp(t, 0.0f, 1.0f);
+    const float ex = s.x0 + t * dx - x, ey = s.y0 + t * dy - y;
+    return std::sqrt(ex * ex + ey * ey);
+}
+
+// Whether a point of the icon is inked; x and y go from 0 to 24.
+bool iconCovers(MenuItem icon, float x, float y) {
+    const auto [segs, n] = segments(icon);
+    for (size_t i = 0; i < n; ++i)
+        if (distToSeg(x, y, segs[i]) <= 1.0f) return true;
     return false;
 }
 }  // namespace
@@ -102,6 +113,9 @@ bool MenuView::init(SDL_Renderer* renderer) {
 }
 
 void MenuView::shutdown() {
+    if (thumbTex_) SDL_DestroyTexture(thumbTex_);
+    thumbTex_ = nullptr;
+    thumbVersion_ = -1;
     for (auto& [k, c] : cache_)
         if (c.tex) SDL_DestroyTexture(c.tex);
     cache_.clear();
@@ -220,33 +234,123 @@ void MenuView::fillRound(int x, int y, int w, int h, int r, SDL_Color c) {
     }
 }
 
-void MenuView::badgeA(int cx, int cy, int r) {
-    fillRound(cx - r, cy - r, 2 * r, 2 * r, r, kAmber);
-    drawText("A", r * 3 / 2, kPanel, cx, cy - r * 3 / 4 - 2, 1);
+void MenuView::drawTextMid(const std::string& s, int px, SDL_Color c, int x, int cy, int align) {
+    const Cached* t = text(s, px, c);
+    if (!t) return;
+    drawText(s, px, c, x, cy - static_cast<int>(std::lround(t->h / scale_ / 2)), align);
 }
 
-void MenuView::drawMenu(const Menu& menu, const std::string& gameTitle, Lang lang) {
+void MenuView::outlineRound(int x, int y, int w, int h, int r, SDL_Color line, SDL_Color inside) {
+    fillRound(x, y, w, h, r, line);
+    fillRound(x + 1, y + 1, w - 2, h - 2, std::max(0, r - 1), inside);
+}
+
+void MenuView::triangle(float x0, float y0, float x1, float y1, float x2, float y2, SDL_Color c) {
+    const SDL_Vertex v[3] = {{{x0, y0}, c, {0, 0}}, {{x1, y1}, c, {0, 0}}, {{x2, y2}, c, {0, 0}}};
+    SDL_RenderGeometry(r_, nullptr, v, 3, nullptr, 0);
+}
+
+void MenuView::badgeA(int cx, int cy, int r) {
+    fillRound(cx - r, cy - r, 2 * r, 2 * r, r, kAmber);
+    drawTextMid("A", r * 6 / 5, kPanel, cx, cy, 1);
+}
+
+void MenuView::drawHints(std::initializer_list<std::pair<Key, std::string>> hints, int rightX, int cy) {
+    constexpr int kKey = 26, kGap = 8, kBetween = 24, kPx = 17;
+    const auto keyW = [](Key k) { return k == Key::LeftRight ? 46 : kKey; };
+    int total = 0;
+    for (const auto& [k, label] : hints) total += keyW(k) + kGap + textWidth(label, kPx) + kBetween;
+    int x = rightX - (total - kBetween);
+    for (const auto& [k, label] : hints) {
+        const int w = keyW(k);
+        outlineRound(x, cy - kKey / 2, w, kKey, kKey / 2, kSecondary, kPanel);
+        outlineRound(x + 1, cy - kKey / 2 + 1, w - 2, kKey - 2, kKey / 2 - 1, kSecondary, kPanel);
+        if (k == Key::LeftRight) {
+            const float mx = x + w / 2.0f, y0 = static_cast<float>(cy);
+            triangle(mx - 5, y0 - 5, mx - 5, y0 + 5, mx - 12, y0, kSecondary);
+            triangle(mx + 5, y0 - 5, mx + 5, y0 + 5, mx + 12, y0, kSecondary);
+        } else {
+            drawTextMid(k == Key::A ? "A" : "B", 14, kSecondary, x + w / 2, cy, 1);
+        }
+        x += w + kGap;
+        drawTextMid(label, kPx, kSecondary, x, cy);
+        x += textWidth(label, kPx) + kBetween;
+    }
+}
+
+void MenuView::drawStateCard(const StateCard& card, int x, int y, int w, Lang lang) {
+    constexpr int kH = 112, kThumbW = 112, kThumbH = 84;
+    fillRound(x, y, w, kH, 16, kCard);
+    const Image* img = card.thumb;
+    if (card.thumbVersion != thumbVersion_) {
+        if (thumbTex_) SDL_DestroyTexture(thumbTex_);
+        thumbTex_ = nullptr;
+        thumbVersion_ = card.thumbVersion;
+        if (img && img->w > 0 && img->h > 0) {
+            thumbTex_ = SDL_CreateTexture(r_, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, img->w, img->h);
+            if (thumbTex_) {
+                SDL_UpdateTexture(thumbTex_, nullptr, img->px.data(), img->w * 4);
+                SDL_SetTextureScaleMode(thumbTex_, SDL_ScaleModeLinear);
+            }
+        }
+    }
+    const SDL_Rect frame{x + 14, y + 14, kThumbW, kThumbH};
+    SDL_SetRenderDrawColor(r_, kLine.r, kLine.g, kLine.b, 255);
+    SDL_RenderFillRect(r_, &frame);
+    if (thumbTex_ && img && img->w > 0 && img->h > 0) {
+        const float k = std::min(kThumbW / float(img->w), kThumbH / float(img->h));
+        const float w2 = img->w * k, h2 = img->h * k;
+        const SDL_FRect dst{frame.x + (kThumbW - w2) / 2, frame.y + (kThumbH - h2) / 2, w2, h2};
+        SDL_RenderCopyF(r_, thumbTex_, nullptr, &dst);
+    }
+    const int tx = x + 14 + kThumbW + 16;
+    drawTextMid(fit(tr(lang, Str::LastState), 18, x + w - tx - 12), 18, kText, tx, y + 44);
+    drawTextMid(card.when, 16, kSecondary, tx, y + 72);
+}
+
+void MenuView::drawMenu(const Menu& menu, const PauseInfo& info, Lang lang) {
     const Scaled scaled(*this);
     SDL_SetRenderDrawBlendMode(r_, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(r_, 0, 0, 0, 170);
+    SDL_SetRenderDrawColor(r_, 6, 9, 18, 148);
     const SDL_Rect all{0, 0, kScreenW, kScreenH};
     SDL_RenderFillRect(r_, &all);
 
-    const int px = sheetLeft(kMenuW);
-    fillRound(px, 0, kMenuW, kScreenH, 0, kPanel);
+    const int px = sheetLeft(kPauseW);
+    fillRound(px, 0, kPauseW, kScreenH, 0, kPanel);
+    fillRound(px, 0, 1, kScreenH, 0, kLine);
+    const int left = px + kPad, width = kPauseW - 2 * kPad, textX = left + 12;
 
-    drawText(fit(gameTitle, 26, kMenuW - 2 * kPad), 26, kTitle, px + kPad, kSheetTop);
+    int y = 40;
+    drawText(info.console, 17, kSecondary, textX, y);
+    y += 28;
+    const auto lines = wrapLines(info.title, width - 24, [&](const std::string& t) { return textWidth(t, 30); }, 2);
+    for (const std::string& line : lines) {
+        drawText(line, 30, kText, textX, y);
+        y += 38;
+    }
+    y += 4;
+    drawText(info.played, 17, kSecondary, textX, y);
+    y += 24 + 28;
 
+    constexpr int kRowH = 60, kRowGap = 4;
     const Str labels[5] = {Str::Continue, Str::SaveState, Str::LoadState, Str::Video, Str::Exit};
-    int y = kSheetTop + 64;
-    for (int i = 0; i < 5; ++i, y += kRow) {
+    for (int i = 0; i < 5; ++i, y += kRowH + kRowGap) {
         const bool disabled = i == static_cast<int>(MenuItem::LoadState) && !menu.hasState();
         const bool sel = static_cast<int>(menu.selected()) == i;
-        const SDL_Color c = disabled ? kMuted : (sel ? kAmber : kText);
-        if (sel) fillRound(px + 12, y, kMenuW - 24, kRow - 8, 10, kAmberSoft);
-        drawIcon(static_cast<MenuItem>(i), px + kPad + 24, y + (kRow - 8) / 2, kIconPx, c);
-        drawText(tr(lang, labels[i]), 30, c, px + kPad + 60, y + 10);
+        const SDL_Color c = disabled ? kDisabled : (sel ? kAmber : kText);
+        const int cy = y + kRowH / 2;
+        if (sel) {
+            fillRound(left, y, width, kRowH, 14, kAmberSoft);
+            badgeA(left + width - 16 - 15, cy, 15);
+        }
+        drawIcon(static_cast<MenuItem>(i), left + 16 + 13, cy, 26, c);
+        drawTextMid(tr(lang, labels[i]), 24, c, left + 60, cy);
     }
+    y += 24 - kRowGap;
+    if (info.state) drawStateCard(*info.state, left, y, width, lang);
+
+    drawHints({{Key::A, tr(lang, Str::HintChoose)}, {Key::B, tr(lang, Str::HintBackToGame)}}, left + width,
+              kScreenH - 28 - 13);
 }
 
 int MenuView::sheetLeft(int width) {
@@ -273,8 +377,8 @@ void MenuView::drawIcon(MenuItem icon, int cx, int cy, int size, SDL_Color c) {
                     int hits = 0;
                     for (int j = 0; j < 4; ++j)
                         for (int i = 0; i < 4; ++i)
-                            hits += iconCovers(icon, (x + (i + .5f) / 4) * 2 / n - 1,
-                                               (y + (j + .5f) / 4) * 2 / n - 1);
+                            hits += iconCovers(icon, (x + (i + .5f) / 4) * 24 / n,
+                                               (y + (j + .5f) / 4) * 24 / n);
                     row[x] = SDL_MapRGBA(surf->format, 255, 255, 255, static_cast<Uint8>(hits * 255 / 16));
                 }
             }
@@ -292,37 +396,91 @@ void MenuView::drawIcon(MenuItem icon, int cx, int cy, int size, SDL_Color c) {
     SDL_RenderCopyF(r_, it->second.tex, nullptr, &dst);
 }
 
+void MenuView::drawValueRow(const std::string& name, const std::string& value, bool sel, bool enabled, int x,
+                            int y, int w, int h, int valuePx, bool fill) {
+    const int cy = y + h / 2, right = x + w - 16;
+    if (sel && fill) fillRound(x, y, w, h, 14, kAmberSoft);
+    drawTextMid(name, 22, enabled ? (sel ? kAmber : kText) : kDisabled, x + 16, cy);
+    if (!enabled) {
+        drawTextMid(value, valuePx, kDisabled, right, cy, 2);
+        return;
+    }
+    if (!sel) {
+        drawTextMid(value, valuePx, kText, right, cy, 2);
+        return;
+    }
+    // Arrows either side of the value on the current row (drawn: the font may lack the glyphs).
+    const float fy = static_cast<float>(cy);
+    triangle(right - 8.0f, fy - 6, right - 8.0f, fy + 6, static_cast<float>(right), fy, kAmber);
+    const int valueRight = right - 22;
+    drawTextMid(value, valuePx, kText, valueRight, cy, 2);
+    const float lx = static_cast<float>(valueRight - textWidth(value, valuePx) - 14);
+    triangle(lx, fy - 6, lx, fy + 6, lx - 8, fy, kAmber);
+}
+
 void MenuView::drawVideoMenu(const VideoMenu& menu, Lang lang) {
     const Scaled scaled(*this);
-    constexpr int kTitleH = 64, kRows = 6, kValuePx = 28;
-    const int px = sheetLeft(kPanelW);
-    fillRound(px, 0, kPanelW, kScreenH, 0, kPanel);
-    drawText(tr(lang, Str::VideoTitle), 26, kTitle, px + kPad, kSheetTop);
+    const int px = sheetLeft(kVideoW);
+    fillRound(px, 0, kVideoW, kScreenH, 0, kPanel);
+    fillRound(px, 0, 1, kScreenH, 0, kLine);
+    const int left = px + kPad, width = kVideoW - 2 * kPad, right = left + width - 16;
+
+    drawText(tr(lang, Str::VideoTitle), 30, kText, left + 12, 40);
+    drawText(tr(lang, Str::VideoHint), 17, kSecondary, left + 12, 84);
 
     const VideoSettings& s = menu.settings();
-    const Str values[4] = {label(s.size), label(s.smooth), label(s.filter), label(s.border)};
-    const Str names[kRows] = {Str::Size, Str::Smoothing, Str::Filter, Str::Border, Str::UseDefault, Str::Back};
-    const int right = px + kPanelW - kPad - 8;
-    int y = kSheetTop + kTitleH;
-    for (int i = 0; i < kRows; ++i, y += kRow) {
-        const auto row = static_cast<VideoRow>(i);
-        const bool enabled = menu.rowEnabled(row);
-        const bool sel = menu.cursor() == row;
-        if (sel) fillRound(px + 12, y, kPanelW - 24, kRow - 8, 10, kAmberSoft);
-        drawText(tr(lang, names[i]), 30, enabled ? (sel ? kAmber : kText) : kMuted, px + kPad + 8, y + 9);
-        if (i >= 4) continue;  // Use default, Back: buttons, no value
-        if (!enabled) {
-            drawText("—", kValuePx, kMuted, right, y + 11, 2);
-            continue;
+    const VideoRow cur = menu.cursor();
+    const auto sel = [&](VideoRow r) { return cur == r; };
+    constexpr int kH = 56, kGap = 4;
+    int y = 130;
+
+    drawValueRow(tr(lang, Str::Size), tr(lang, label(s.size)), sel(VideoRow::Size), true, left, y, width, kH, 22);
+    y += kH + kGap;
+
+    drawValueRow(tr(lang, Str::Smoothing), tr(lang, label(s.smooth)), sel(VideoRow::Smooth), true, left, y, width, kH,
+                 22);
+    y += kH + kGap;
+
+    if (sel(VideoRow::Filter)) {
+        // Opened: what the filter looks like, and where it sits in the list.
+        constexpr int kOpenH = 92;
+        fillRound(left, y, width, kOpenH, 14, kAmberSoft);
+        drawValueRow(tr(lang, Str::Filter), tr(lang, label(s.filter)), true, true, left, y + 2, width, 56, 22, false);
+        const int cy2 = y + 68;
+        // NTSC is the last filter; without it there are two.
+        constexpr int kFilters = kNtscEnabled ? 3 : 2;
+        constexpr int kDotsW = (kFilters - 1) * 8 + 22 + (kFilters - 1) * 6;
+        drawTextMid(fit(tr(lang, description(s.filter)), 16, width - 32 - kDotsW - 16), 16, kDesc, left + 16, cy2);
+        int dx = right - kDotsW;
+        for (int i = 0; i < kFilters; ++i) {
+            const bool on = i == static_cast<int>(s.filter);
+            const int dw = on ? 22 : 8;
+            fillRound(dx, cy2 - 4, dw, 8, 4, on ? kAmber : kDot);
+            dx += dw + 6;
         }
-        // "‹ value ›"; the arrows light up on the current row.
-        const SDL_Color arrow = sel ? kAmber : kMuted;
-        const std::string value = tr(lang, values[i]);
-        const int valueRight = right - 26;
-        drawText("›", kValuePx, arrow, right, y + 11, 2);
-        drawText(value, kValuePx, kText, valueRight, y + 11, 2);
-        drawText("‹", kValuePx, arrow, valueRight - textWidth(value, kValuePx) - 14, y + 11, 2);
+        y += kOpenH + kGap;
+    } else {
+        drawValueRow(tr(lang, Str::Filter), tr(lang, label(s.filter)), false, true, left, y, width, kH, 22);
+        y += kH + kGap;
     }
+
+    const bool borderOn = menu.rowEnabled(VideoRow::Border);
+    drawValueRow(tr(lang, Str::Border), borderOn ? tr(lang, label(s.border)) : "—", sel(VideoRow::Border), borderOn,
+                 left, y, width, kH, 22);
+    y += kH + 18;
+
+    const int bw = (width - 12) / 2;
+    const std::pair<VideoRow, Str> buttons[2] = {{VideoRow::UseDefault, Str::UseDefault}, {VideoRow::Back, Str::Back}};
+    for (int i = 0; i < 2; ++i) {
+        const bool here = sel(buttons[i].first);
+        const int bx = left + i * (bw + 12);
+        outlineRound(bx, y, bw, 52, 14, here ? kAmber : kLine, kPanel);
+        if (here) fillRound(bx + 1, y + 1, bw - 2, 50, 13, kAmberSoft);
+        drawTextMid(tr(lang, buttons[i].second), 19, here ? kAmber : kText, bx + bw / 2, y + 26, 1);
+    }
+
+    drawHints({{Key::LeftRight, tr(lang, Str::HintChange)}, {Key::B, tr(lang, Str::Back)}}, left + width,
+              kScreenH - 28 - 13);
 }
 
 void MenuView::drawToast(const std::string& msg) {
@@ -340,7 +498,7 @@ void MenuView::drawError(const std::string& message, bool withBack, Lang lang) {
     const int w = 900, h = withBack ? 260 : 190;
     const int px = (kScreenW - w) / 2, py = (kScreenH - h) / 2;
     fillRound(px, py, w, h, 12, kPanel);
-    drawText(fit(message, 34, w - 2 * kPad), 34, kText, kScreenW / 2, py + 52, 1);
+    drawText(fit(message, 34, w - 2 * 28), 34, kText, kScreenW / 2, py + 52, 1);
     if (withBack) {
         const std::string label = tr(lang, Str::BackToEquinox);
         const int lw = textWidth(label, 30);

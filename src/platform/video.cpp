@@ -274,6 +274,11 @@ void Video::upload(const void* px, unsigned w, unsigned h, size_t pitch) {
         SDL_SetTextureBlendMode(tex_, SDL_BLENDMODE_NONE);
         applyGameScaleMode();
     }
+    // Kept on the CPU so saving a state can store a picture of the game.
+    lastFrame_.resize(static_cast<size_t>(w) * h);
+    for (unsigned y = 0; y < h; ++y)
+        std::memcpy(&lastFrame_[static_cast<size_t>(y) * w], static_cast<const uint8_t*>(px) + y * pitch,
+                    w * sizeof(uint16_t));
     if (native565_) {
         SDL_UpdateTexture(tex_, nullptr, px, static_cast<int>(pitch));
         return;

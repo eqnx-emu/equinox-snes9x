@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <exception>
 #include <memory>
 #include <new>
@@ -19,6 +20,7 @@
 #include "core_options.hpp"
 #include "file_io.hpp"
 #include "menu.hpp"
+#include "menu_text.hpp"
 #include "paths.hpp"
 #include "platform/audio.hpp"
 #include "platform/input.hpp"
@@ -28,6 +30,7 @@
 #include "platform/video.hpp"
 #include "rom.hpp"
 #include "strings.hpp"
+#include "thumbnail.hpp"
 #include "video_art.hpp"
 #include "video_menu.hpp"
 #include "video_prefs.hpp"
@@ -35,6 +38,7 @@
 #ifdef __SWITCH__
 #include <switch.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -193,12 +197,26 @@ static void followDock(SDL_Window* window, Video& video, bool& docked) {
     std::fprintf(stderr, "renderer output %dx%d\n", ow, oh);
 }
 
-static bool fileExists(const std::string& path) {
-    if (std::FILE* f = std::fopen(path.c_str(), "rb")) {
-        std::fclose(f);
-        return true;
+// The console's local time. libnx's time() is UTC; the time zone rule turns it local.
+static std::tm localTm(std::time_t t) {
+    std::tm out{};
+#ifdef __SWITCH__
+    TimeCalendarTime cal{};
+    TimeCalendarAdditionalInfo info{};
+    if (R_SUCCEEDED(timeToCalendarTimeWithMyRule(static_cast<u64>(t), &cal, &info))) {
+        out.tm_year = cal.year - 1900;
+        out.tm_mon = cal.month - 1;
+        out.tm_mday = cal.day;
+        out.tm_hour = cal.hour;
+        out.tm_min = cal.minute;
+        out.tm_sec = cal.second;
+        out.tm_yday = static_cast<int>(info.yday);
+        out.tm_wday = static_cast<int>(info.wday);
+        return out;
     }
-    return false;
+#endif
+    if (const std::tm* l = std::localtime(&t)) out = *l;
+    return out;
 }
 
 // Full-screen error. With a back button, A ends it and main returns, which opens
@@ -235,7 +253,13 @@ static Str romErrorText(RomError e) {
 static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Video& video,
                      Input& input, Audio& audio, Core& core, MenuView& view) {
     const std::string stateFile = statePath(args.states, args.rom);
+    const std::string thumbFile = stateThumbPath(args.states, args.rom);
     const std::string title = args.title.empty() ? romStem(args.rom) : args.title;
+    const Uint32 startedAt = SDL_GetTicks();
+    // The pause sheet's last-state card: when it was saved and its picture.
+    Image stateThumb;
+    int thumbVersion = 0;
+    std::optional<std::time_t> stateSavedAt;
     Menu menu;
     bool running = true;
 
@@ -269,7 +293,19 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
     std::optional<VideoMenu> videoMenu;  // open over the paused game, from the pause menu
 
     auto openMenu = [&] {
-        menu.setHasState(fileExists(stateFile));
+        struct stat st{};
+        const bool hasState = stat(stateFile.c_str(), &st) == 0;
+        menu.setHasState(hasState);
+        stateSavedAt.reset();
+        if (hasState) {
+            stateSavedAt = st.st_mtime;
+            try {
+                stateThumb = loadPng(thumbFile, 640);
+            } catch (const std::bad_alloc&) {
+                stateThumb = {};
+            }
+            ++thumbVersion;
+        }
         menu.open();
         audio.pause(true);
     };
@@ -283,6 +319,25 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
         const auto st = core.serialize();
         if (!st.empty() && writeFileAtomic(stateFile, st)) {
             menu.setHasState(true);
+            stateSavedAt = std::time(nullptr);
+            // The card's picture; a state without one still loads.
+            const auto& frame = video.lastFrame();
+            constexpr unsigned kThumbW = 160, kThumbH = 120;
+            const auto rgb = frame.empty() ? std::vector<uint8_t>{}
+                                           : thumbnailRgb(frame.data(), video.frameW(), video.frameH(), kThumbW, kThumbH);
+            const auto png = encodePng(rgb, kThumbW, kThumbH);
+            if (png.empty() || !writeFileAtomic(thumbFile, png))
+                std::fprintf(stderr, "could not write state picture %s\n", thumbFile.c_str());
+            stateThumb = {};
+            if (!rgb.empty()) {
+                stateThumb.w = kThumbW;
+                stateThumb.h = kThumbH;
+                stateThumb.px.resize(static_cast<size_t>(kThumbW) * kThumbH);
+                for (size_t i = 0; i < stateThumb.px.size(); ++i)
+                    stateThumb.px[i] = 0xFF000000u | (uint32_t{rgb[i * 3]} << 16) | (uint32_t{rgb[i * 3 + 1]} << 8) |
+                                       rgb[i * 3 + 2];
+            }
+            ++thumbVersion;
             g_toasts.show(tr(g_lang, Str::StateSaved));
         } else {
             std::fprintf(stderr, "could not write state %s\n", stateFile.c_str());
@@ -384,7 +439,14 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
             view.drawVideoMenu(*videoMenu, g_lang);
         } else if (menu.isOpen()) {
             video.drawGame();
-            view.drawMenu(menu, title, g_lang);
+            PauseInfo info;
+            info.console = "Super Nintendo";
+            info.title = title;
+            info.played = playedFor(g_lang, (SDL_GetTicks() - startedAt) / 1000);
+            if (stateSavedAt)
+                info.state = StateCard{savedAt(g_lang, localTm(*stateSavedAt), localTm(std::time(nullptr))),
+                                       &stateThumb, thumbVersion};
+            view.drawMenu(menu, info, g_lang);
         } else {
             core.runFrame();
             g_sram.tick();

@@ -8,7 +8,8 @@ enum class Str {
     Video, VideoTitle, Size, Smoothing, Filter, Border, UseDefault, Back,
     SizeOriginal, Size87, Size43, SizeFull, SmoothPixel, SmoothSharp, SmoothSoft,
     FilterNone, FilterScanlines, FilterNtsc, BorderEquinox, BorderCover, BorderTv,
-    BorderBlack, VideoSaveFailed
+    BorderBlack, VideoSaveFailed,
+    HintChoose, HintBackToGame, HintChange, LastState, VideoHint, DescNone, DescScanlines, DescNtsc
 };
 
 // UTF-8 text, never null.

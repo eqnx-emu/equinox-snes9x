@@ -22,6 +22,10 @@ std::string statePath(const std::string& statesDir, const std::string& romPath) 
     return join(statesDir, romStem(romPath) + ".state");
 }
 
+std::string stateThumbPath(const std::string& statesDir, const std::string& romPath) {
+    return statePath(statesDir, romPath) + ".png";
+}
+
 std::string videoPrefsPath(const std::string& savesDir, const std::string& romPath) {
     return join(savesDir, romStem(romPath) + ".video.json");
 }

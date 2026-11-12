@@ -21,6 +21,10 @@ TEST_CASE("state path") {
     CHECK(statePath("/st", "/r/Game.zip") == "/st/Game.state");
 }
 
+TEST_CASE("the state thumbnail sits beside the state") {
+    CHECK(stateThumbPath("/st", "/r/Game.zip") == "/st/Game.state.png");
+}
+
 TEST_CASE("video prefs path uses zip name") {
     CHECK(videoPrefsPath("sdmc:/s", "sdmc:/r/Chrono Trigger (USA).zip") ==
           "sdmc:/s/Chrono Trigger (USA).video.json");

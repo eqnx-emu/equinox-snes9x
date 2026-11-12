@@ -33,6 +33,10 @@ public:
     void drawGame();
     void flip();
     SDL_Renderer* renderer() const { return renderer_; }
+    // The last frame the core sent, RGB565 rows packed; empty before the first one.
+    const std::vector<uint16_t>& lastFrame() const { return lastFrame_; }
+    unsigned frameW() const { return w_; }
+    unsigned frameH() const { return h_; }
 
 private:
     void drawBackground(const Rect& game);
@@ -51,6 +55,7 @@ private:
 
     SDL_Texture* tex_ = nullptr;  // the game frame
     unsigned w_ = 0, h_ = 0;
+    std::vector<uint16_t> lastFrame_;  // a copy of the last frame, rows packed, for state pictures
     SDL_Texture* sharp_ = nullptr;  // Sharp: the frame enlarged by whole factors with nearest
     unsigned sharpW_ = 0, sharpH_ = 0;
     SDL_Texture* scan_ = nullptr;
