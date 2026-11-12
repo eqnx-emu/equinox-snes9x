@@ -10,7 +10,10 @@ enum class Str {
     FilterNone, FilterScanlines, FilterNtsc, BorderEquinox, BorderCover, BorderTv,
     BorderBlack, VideoSaveFailed,
     FilterZfastCrt, FilterCrtEasymode, FilterCrtLottes, FilterCrtHyllian, FilterCrtGeom,
-    Intensity, IntensityLight, IntensityMedium, IntensityStrong
+    Intensity, IntensityLight, IntensityMedium, IntensityStrong,
+    HintChoose, HintBackToGame, HintChange, LastState, SmoothOffWithFilter, VideoHint,
+    DescNone, DescScanlines, DescNtsc, DescZfastCrt, DescCrtEasymode, DescCrtLottes, DescCrtHyllian,
+    DescCrtGeom
 };
 
 // UTF-8 text, never null.

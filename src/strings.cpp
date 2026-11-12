@@ -55,6 +55,20 @@ constexpr Pair kTable[] = {
     {"Leve", "Light"},
     {"Médio", "Medium"},
     {"Forte", "Strong"},
+    {"Escolher", "Choose"},
+    {"Voltar ao jogo", "Back to the game"},
+    {"Trocar", "Change"},
+    {"Último estado salvo", "Last saved state"},
+    {"Desligada com filtro", "Off with a filter"},
+    {"As mudanças aparecem no jogo enquanto você escolhe", "Changes show on the game as you choose"},
+    {"A imagem do jogo, sem efeito", "The game's picture, untouched"},
+    {"Linhas escuras entre as linhas da imagem", "Dark lines between the picture's lines"},
+    {"Cores e borrões do sinal de TV antigo", "The color bleed of an old TV signal"},
+    {"TV de tubo leve, a mais rápida", "A light CRT, the fastest one"},
+    {"TV de tubo nítida, com máscara suave", "A sharp CRT with a soft mask"},
+    {"TV de tubo com máscara de fósforo", "A CRT with a phosphor mask"},
+    {"TV de tubo com cores vivas", "A CRT with vivid colors"},
+    {"TV de tubo clássica, curva no Forte", "A classic CRT, curved on Strong"},
 };
 }  // namespace
 

@@ -9,7 +9,10 @@ E step(E v, int dir, int count) {
 
 void VideoMenu::moveCursor(int dir) {
     const int d = dir < 0 ? -1 : 1;
-    int i = static_cast<int>(cursor_) + d;
+    const bool onButtons = cursor_ == VideoRow::UseDefault || cursor_ == VideoRow::Back;
+    if (onButtons && d > 0) return;
+    int i = (onButtons ? static_cast<int>(VideoRow::UseDefault) : static_cast<int>(cursor_)) + d;
+    if (i == static_cast<int>(VideoRow::Back)) i = static_cast<int>(VideoRow::UseDefault);
     while (i >= static_cast<int>(VideoRow::Size) && i <= static_cast<int>(VideoRow::Back)) {
         if (rowEnabled(static_cast<VideoRow>(i))) {
             cursor_ = static_cast<VideoRow>(i);
@@ -31,7 +34,7 @@ VideoAction VideoMenu::change(int dir) {
             if (s_.border == Border::Tv && s_.size != Size::Original) s_.border = step(s_.border, dir, 4);
             return VideoAction::Changed;
         case VideoRow::UseDefault:
-        case VideoRow::Back: break;
+        case VideoRow::Back: cursor_ = dir < 0 ? VideoRow::UseDefault : VideoRow::Back; break;
     }
     return VideoAction::None;
 }
@@ -94,4 +97,18 @@ Str label(Intensity v) {
         case Intensity::Strong: return Str::IntensityStrong;
     }
     return Str::IntensityMedium;
+}
+
+Str description(Filter v) {
+    switch (v) {
+        case Filter::None: return Str::DescNone;
+        case Filter::Scanlines: return Str::DescScanlines;
+        case Filter::Ntsc: return Str::DescNtsc;
+        case Filter::ZfastCrt: return Str::DescZfastCrt;
+        case Filter::CrtEasymode: return Str::DescCrtEasymode;
+        case Filter::CrtLottes: return Str::DescCrtLottes;
+        case Filter::CrtHyllian: return Str::DescCrtHyllian;
+        case Filter::CrtGeom: return Str::DescCrtGeom;
+    }
+    return Str::DescNone;
 }

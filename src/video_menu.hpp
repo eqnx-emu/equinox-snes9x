@@ -25,8 +25,11 @@ public:
         }
     }
 
-    void moveCursor(int dir);     // skips disabled rows, does not wrap
-    VideoAction change(int dir);  // left/right on the value rows, wraps
+    // Skips disabled rows, does not wrap. "Use default" and "Back" share the last row:
+    // down stops there, up from either goes to the last enabled value row.
+    void moveCursor(int dir);
+    // Left/right: wraps the value rows; moves between the two buttons.
+    VideoAction change(int dir);
     VideoAction confirm();        // A: buttons act; value rows behave as change(+1)
     VideoAction back() { return VideoAction::Close; }
 
@@ -40,3 +43,5 @@ Str label(Smooth);
 Str label(Filter);
 Str label(Border);
 Str label(Intensity);
+// One line on what the filter looks like.
+Str description(Filter);
