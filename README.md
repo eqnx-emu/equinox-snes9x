@@ -55,7 +55,7 @@ line (protocol version 1):
 | `--rom`      | yes      | Path of the SNES ROM to run. |
 | `--title`    | no       | Display name of the game. |
 | `--saves`    | no       | Directory for battery saves. |
-| `--states`   | no       | Directory for save states. |
+| `--states`   | no       | Directory for save states. Saving a state also writes a small picture of the game beside it (`<stem>.state.png`), shown in the pause menu. |
 | `--return`   | yes      | Path of the Equinox `.nro` to reopen on exit. |
 | `--resume`   | no       | Opaque token. The runner never interprets it; Equinox decides what it holds (screen, filter, game) and gets it back unchanged. |
 | `--cover`    | no       | PNG of the game cover, used by the `cover` border. Without it, `cover` falls back to `equinox`. |
@@ -85,8 +85,16 @@ row).
 |----------|--------|
 | `size`   | `original` (default), `8:7`, `4:3`, `full` |
 | `smooth` | `pixel` (default), `sharp`, `soft` |
-| `filter` | `none` (default), `scanlines`, `ntsc` |
+| `filter` | `none` (default), `scanlines`, `ntsc`, `zfast-crt`, `crt-easymode`, `crt-lottes`, `crt-hyllian`, `crt-geom` |
+| `intensity` | `medium` (default), `light`, `strong` |
 | `border` | `equinox` (default), `cover`, `tv`, `black` |
+
+Every filter except `none` is a RetroArch GLSL preset from `romfs/shaders/`, drawn
+over the game picture with OpenGL ES. `intensity` picks how strong it is: `medium` is
+the preset's own look, `light` and `strong` change its parameters. Only `crt-geom` on
+`strong` curves the picture. With a filter on, the preset decides the sampling, so
+`smooth` is not used (it is kept, and applies again with `none`). A filter that the
+console's GL cannot build is logged and the game shows without it.
 
     {"size": "4:3", "filter": "scanlines"}
 

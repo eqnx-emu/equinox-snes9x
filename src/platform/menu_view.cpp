@@ -294,12 +294,14 @@ void MenuView::drawStateCard(const StateCard& card, int x, int y, int w, Lang la
             }
         }
     }
-    const SDL_Rect dst{x + 14, y + 14, kThumbW, kThumbH};
-    if (thumbTex_) {
-        SDL_RenderCopy(r_, thumbTex_, nullptr, &dst);
-    } else {
-        SDL_SetRenderDrawColor(r_, kLine.r, kLine.g, kLine.b, 255);
-        SDL_RenderFillRect(r_, &dst);
+    const SDL_Rect frame{x + 14, y + 14, kThumbW, kThumbH};
+    SDL_SetRenderDrawColor(r_, kLine.r, kLine.g, kLine.b, 255);
+    SDL_RenderFillRect(r_, &frame);
+    if (thumbTex_ && img && img->w > 0 && img->h > 0) {
+        const float k = std::min(kThumbW / float(img->w), kThumbH / float(img->h));
+        const float w2 = img->w * k, h2 = img->h * k;
+        const SDL_FRect dst{frame.x + (kThumbW - w2) / 2, frame.y + (kThumbH - h2) / 2, w2, h2};
+        SDL_RenderCopyF(r_, thumbTex_, nullptr, &dst);
     }
     const int tx = x + 14 + kThumbW + 16;
     drawTextMid(fit(tr(lang, Str::LastState), 18, x + w - tx - 12), 18, kText, tx, y + 44);
