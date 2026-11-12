@@ -8,6 +8,8 @@
 #include <string>
 
 #include "doctest/doctest.h"
+#include "shader_preset.hpp"
+#include "shader_source.hpp"
 
 namespace {
 namespace fs = std::filesystem;
@@ -90,6 +92,21 @@ TEST_CASE("only crt-geom strong curves") {
     for (Intensity i : kLevels) {
         CHECK(overrideOf(Filter::CrtLottes, i, "CURVATURE") == 0.0f);
         CHECK(overrideOf(Filter::CrtLottes, i, "CORNER") == 0.0f);
+    }
+}
+
+TEST_CASE("every bundled preset parses and its stages build on GLES3") {
+    for (Filter f : kShaderFilters) {
+        const fs::path preset = kRoot / presetPath(f);
+        INFO(presetPath(f));
+        const auto p = parsePreset(slurp(preset), preset.parent_path().generic_string());
+        REQUIRE(p);
+        for (const PassSpec& pass : p->passes) {
+            const std::string src = slurp(pass.shader);
+            REQUIRE_FALSE(src.empty());
+            CHECK(buildStage(src, Stage::Vertex, true));
+            CHECK(buildStage(src, Stage::Fragment, true));
+        }
     }
 }
 
