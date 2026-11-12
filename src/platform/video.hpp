@@ -35,6 +35,10 @@ public:
     void drawGame();
     void flip();
     SDL_Renderer* renderer() const { return renderer_; }
+    // The last frame the core sent, RGB565 rows packed; empty before the first one.
+    const std::vector<uint16_t>& lastFrame() const { return lastFrame_; }
+    unsigned frameW() const { return w_; }
+    unsigned frameH() const { return h_; }
 
 private:
     void drawBackground(const Rect& game);
