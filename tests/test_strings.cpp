@@ -5,7 +5,7 @@
 #include "doctest/doctest.h"
 
 TEST_CASE("every string has text in both languages") {
-    for (int i = 0; i <= static_cast<int>(Str::VideoSaveFailed); ++i) {
+    for (int i = 0; i <= static_cast<int>(Str::DescNtsc); ++i) {
         const auto s = static_cast<Str>(i);
         REQUIRE(tr(Lang::PtBR, s) != nullptr);
         REQUIRE(tr(Lang::EnUS, s) != nullptr);
@@ -26,4 +26,12 @@ TEST_CASE("video strings") {
     CHECK(std::strcmp(tr(Lang::PtBR, Str::Video), "Vídeo") == 0);
     CHECK(std::strcmp(tr(Lang::EnUS, Str::SizeFull), "Full screen") == 0);
     CHECK(std::strcmp(tr(Lang::PtBR, Str::BorderCover), "Capa do jogo") == 0);
+}
+
+TEST_CASE("pause and video sheet strings") {
+    CHECK(std::strcmp(tr(Lang::PtBR, Str::HintChoose), "Escolher") == 0);
+    CHECK(std::strcmp(tr(Lang::PtBR, Str::HintBackToGame), "Voltar ao jogo") == 0);
+    CHECK(std::strcmp(tr(Lang::EnUS, Str::HintChange), "Change") == 0);
+    CHECK(std::strcmp(tr(Lang::PtBR, Str::LastState), "Último estado salvo") == 0);
+    CHECK(std::strcmp(tr(Lang::PtBR, Str::VideoHint), "As mudanças aparecem no jogo enquanto você escolhe") == 0);
 }

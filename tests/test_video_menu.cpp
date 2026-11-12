@@ -50,9 +50,41 @@ TEST_CASE("cursor stops at the ends") {
     m.moveCursor(-1);
     CHECK(m.cursor() == VideoRow::Size);
     for (int i = 0; i < 10; ++i) m.moveCursor(1);
+    CHECK(m.cursor() == VideoRow::UseDefault);  // the buttons share the last row
+}
+
+TEST_CASE("left and right move between the two buttons") {
+    VideoMenu m(VideoSettings{});
+    for (int i = 0; i < 10; ++i) m.moveCursor(1);
+    REQUIRE(m.cursor() == VideoRow::UseDefault);
+    CHECK(m.change(1) == VideoAction::None);
+    CHECK(m.cursor() == VideoRow::Back);
+    CHECK(m.change(1) == VideoAction::None);
     CHECK(m.cursor() == VideoRow::Back);
     m.moveCursor(1);
     CHECK(m.cursor() == VideoRow::Back);
+    CHECK(m.change(-1) == VideoAction::None);
+    CHECK(m.cursor() == VideoRow::UseDefault);
+    CHECK(m.change(-1) == VideoAction::None);
+    CHECK(m.cursor() == VideoRow::UseDefault);
+}
+
+TEST_CASE("up from either button goes to the last value row") {
+    VideoSettings orig;
+    orig.size = Size::Original;
+    VideoMenu m(orig);
+    for (int i = 0; i < 10; ++i) m.moveCursor(1);
+    m.change(1);
+    REQUIRE(m.cursor() == VideoRow::Back);
+    m.moveCursor(-1);
+    CHECK(m.cursor() == VideoRow::Border);
+    VideoSettings full;
+    full.size = Size::Full;
+    VideoMenu f(full);
+    for (int i = 0; i < 10; ++i) f.moveCursor(1);
+    f.change(1);
+    f.moveCursor(-1);
+    CHECK(f.cursor() == VideoRow::Filter);
 }
 
 TEST_CASE("filter never reaches ntsc when it is not allowed") {
@@ -123,16 +155,18 @@ TEST_CASE("confirm and back") {
     for (int i = 0; i < 4; ++i) m.moveCursor(1);
     CHECK(m.cursor() == VideoRow::UseDefault);
     CHECK(m.confirm() == VideoAction::UseDefault);
-    m.moveCursor(1);
+    m.change(1);
     CHECK(m.cursor() == VideoRow::Back);
     CHECK(m.confirm() == VideoAction::Close);
     CHECK(m.back() == VideoAction::Close);
 }
 
-TEST_CASE("change does nothing on the button rows") {
+TEST_CASE("change on the buttons leaves the settings alone") {
     VideoMenu m(VideoSettings{});
-    for (int i = 0; i < 4; ++i) m.moveCursor(1);
-    CHECK(m.change(1) == VideoAction::None);
+    for (int i = 0; i < 10; ++i) m.moveCursor(1);
+    m.change(1);
+    m.change(-1);
+    CHECK(m.settings() == VideoSettings{});
 }
 
 TEST_CASE("reset replaces the settings") {
@@ -152,4 +186,11 @@ TEST_CASE("labels have text") {
     for (Border v : {Border::Equinox, Border::Cover, Border::Tv, Border::Black})
         CHECK(std::strlen(tr(Lang::EnUS, label(v))) > 0);
     CHECK(label(Size::Aspect87) == Str::Size87);
+}
+
+TEST_CASE("every filter has a description") {
+    for (Filter v : {Filter::None, Filter::Scanlines, Filter::Ntsc})
+        CHECK(std::strlen(tr(Lang::PtBR, description(v))) > 0);
+    CHECK(description(Filter::Scanlines) != description(Filter::Ntsc));
+    CHECK(std::strcmp(tr(Lang::PtBR, description(Filter::Scanlines)), "Linhas escuras entre as linhas da imagem") == 0);
 }

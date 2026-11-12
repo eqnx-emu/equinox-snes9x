@@ -17,8 +17,11 @@ public:
     void reset(VideoSettings s) { s_ = s; }  // after "Use default"
     bool rowEnabled(VideoRow r) const { return r != VideoRow::Border || s_.size != Size::Full; }
 
-    void moveCursor(int dir);     // skips disabled rows, does not wrap
-    VideoAction change(int dir);  // left/right on the first four rows, wraps
+    // Skips disabled rows, does not wrap. "Use default" and "Back" share the last row:
+    // down stops there, up from either goes to the last enabled value row.
+    void moveCursor(int dir);
+    // Left/right: wraps the value rows; moves between the two buttons.
+    VideoAction change(int dir);
     VideoAction confirm();        // A: buttons act; value rows behave as change(+1)
     VideoAction back() { return VideoAction::Close; }
 
@@ -32,3 +35,5 @@ Str label(Size);
 Str label(Smooth);
 Str label(Filter);
 Str label(Border);
+// One line on what the filter looks like.
+Str description(Filter);
