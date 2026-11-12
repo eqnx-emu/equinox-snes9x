@@ -421,7 +421,7 @@ public:
     SramSession& operator=(const SramSession&) = delete;
 };
 
-static void run(const std::optional<LaunchArgs>& args, bool showFps, SDL_Window*& window) {
+static void run(const std::optional<LaunchArgs>& args, bool showFps, bool glProbe, SDL_Window*& window) {
     const bool docked = isDocked();
     int screenW = 0, screenH = 0;
     screenSize(docked, screenW, screenH);
@@ -432,7 +432,7 @@ static void run(const std::optional<LaunchArgs>& args, bool showFps, SDL_Window*
     Audio audio;
     Core core;
     MenuView view;
-    if (!window || !video.init(window, showFps)) {
+    if (!window || !video.init(window, showFps, glProbe)) {
         std::fprintf(stderr, "video init failed\n");
         return;
     }
@@ -499,9 +499,11 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "could not read the launch arguments\n");
     }
 
-    bool showFps = false;
-    for (int i = 1; i < argc; ++i)
+    bool showFps = false, glProbe = false;
+    for (int i = 1; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--show-fps")) showFps = true;
+        if (!std::strcmp(argv[i], "--gl-probe")) glProbe = true;
+    }
 
     g_lang = systemLang();
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO) != 0) {
@@ -512,7 +514,7 @@ int main(int argc, char** argv) {
     // No exception may reach std::terminate: that would abort without reopening Equinox.
     // Unwinding runs SramSession first, so the battery save is written on the way out.
     try {
-        run(args, showFps, window);
+        run(args, showFps, glProbe, window);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "fatal: %s\n", e.what());
     } catch (...) {

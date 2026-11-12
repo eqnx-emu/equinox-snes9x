@@ -178,9 +178,10 @@ void destroy(SDL_Texture*& t) {
 SDL_Rect toSdl(const Rect& r) { return SDL_Rect{r.x, r.y, r.w, r.h}; }
 }  // namespace
 
-bool Video::init(SDL_Window* window, bool showFps) {
+bool Video::init(SDL_Window* window, bool showFps, bool glProbe) {
     renderer_ = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     showFps_ = showFps;
+    glProbe_ = glProbe;
     lastTick_ = SDL_GetTicks();
     if (!renderer_) return false;
     // The Switch (GLES2) renderer usually lacks RGB565 textures: convert on upload then.
@@ -199,6 +200,7 @@ bool Video::init(SDL_Window* window, bool showFps) {
                       ((b << 3) | (b >> 2));
         }
     }
+    initGl();
     int w = 0, h = 0;
     if (SDL_GetRendererOutputSize(renderer_, &w, &h) != 0) SDL_GetWindowSize(window, &w, &h);
     screenW_ = screenH_ = 0;
@@ -259,6 +261,11 @@ void Video::applyGameScaleMode() {
 
 void Video::upload(const void* px, unsigned w, unsigned h, size_t pitch) {
     if (!renderer_ || !px) return;
+    lastFrame_.resize(static_cast<size_t>(w) * h);
+    for (unsigned y = 0; y < h; ++y)
+        std::memcpy(&lastFrame_[static_cast<size_t>(y) * w], static_cast<const char*>(px) + y * pitch,
+                    w * sizeof(uint16_t));
+    frameDirty_ = true;
     if (!tex_ || w != w_ || h != h_) {
         if (tex_) SDL_DestroyTexture(tex_);
         tex_ = SDL_CreateTexture(renderer_,
@@ -420,7 +427,7 @@ void Video::drawGame() {
     const Rect game = tex_ ? gameRect(settings_.size, w_, h_, screenW_, screenH_) : Rect{0, 0, 0, 0};
     drawBackground(game);
     if (game.w > 0) {
-        drawFrame(game);
+        if (!drawProbe(game)) drawFrame(game);
         if (settings_.filter == Filter::Scanlines) drawScanlines(game);
         if (tvFrameShown()) {
             const SDL_Rect clip = toSdl(game);
@@ -439,4 +446,100 @@ void Video::flip() {
 void Video::present() {
     drawGame();
     flip();
+}
+
+// MARK: - GL
+
+namespace {
+GLuint compile(GLenum type, const char* src) {
+    const GLuint sh = gl::f.CreateShader(type);
+    gl::f.ShaderSource(sh, 1, &src, nullptr);
+    gl::f.CompileShader(sh);
+    GLint ok = 0;
+    gl::f.GetShaderiv(sh, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        char log[1024] = {};
+        gl::f.GetShaderInfoLog(sh, sizeof log, nullptr, log);
+        std::fprintf(stderr, "shader compile failed: %s\n", log);
+        gl::f.DeleteShader(sh);
+        return 0;
+    }
+    return sh;
+}
+
+constexpr const char* kProbeVs =
+    "#version 100\n"
+    "attribute vec2 pos; attribute vec2 uv; varying vec2 v;\n"
+    "void main() { v = uv; gl_Position = vec4(pos * 2.0 - 1.0, 0.0, 1.0); }\n";
+constexpr const char* kProbeFs =
+    "#version 100\nprecision mediump float;\n"
+    "uniform sampler2D tex; varying vec2 v;\n"
+    "void main() { gl_FragColor = texture2D(tex, v); }\n";
+constexpr const char* kEs3Fs =
+    "#version 300 es\nprecision mediump float;\nout vec4 c;\nvoid main() { c = vec4(1.0); }\n";
+}  // namespace
+
+void Video::initGl() {
+    glReady_ = gl::load();
+    if (!glReady_) return;
+    glInfo_ = gl::queryInfo();
+    SDL_version v;
+    SDL_GetVersion(&v);
+    std::fprintf(stderr, "SDL %d.%d.%d\n", v.major, v.minor, v.patch);
+    if (!glProbe_) return;
+    const gl::StateGuard guard;
+    const GLuint es3 = compile(GL_FRAGMENT_SHADER, kEs3Fs);
+    std::fprintf(stderr, "probe: #version 300 es %s\n", es3 ? "compiles" : "does not compile");
+    if (es3) gl::f.DeleteShader(es3);
+    const GLuint vs = compile(GL_VERTEX_SHADER, kProbeVs), fs = compile(GL_FRAGMENT_SHADER, kProbeFs);
+    if (!vs || !fs) return;
+    probeProgram_ = gl::f.CreateProgram();
+    gl::f.AttachShader(probeProgram_, vs);
+    gl::f.AttachShader(probeProgram_, fs);
+    gl::f.BindAttribLocation(probeProgram_, 0, "pos");
+    gl::f.BindAttribLocation(probeProgram_, 1, "uv");
+    gl::f.LinkProgram(probeProgram_);
+    gl::f.DeleteShader(vs);
+    gl::f.DeleteShader(fs);
+    gl::f.GenTextures(1, &probeTex_);
+    gl::f.BindTexture(GL_TEXTURE_2D, probeTex_);
+    gl::f.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gl::f.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    gl::f.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl::f.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    std::fprintf(stderr, "probe: GL program %s\n", probeProgram_ ? "ready" : "failed");
+}
+
+bool Video::drawProbe(const Rect& game) {
+    if (!glProbe_ || !probeProgram_ || lastFrame_.empty()) return false;
+    SDL_RenderFlush(renderer_);
+    const gl::StateGuard guard;
+    gl::f.BindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl::f.BindBuffer(GL_ARRAY_BUFFER, 0);
+    gl::f.ActiveTexture(GL_TEXTURE0);
+    gl::f.BindTexture(GL_TEXTURE_2D, probeTex_);
+    gl::f.PixelStorei(GL_UNPACK_ALIGNMENT, 2);
+    if (probeW_ != w_ || probeH_ != h_) {
+        probeW_ = w_;
+        probeH_ = h_;
+        gl::f.TexImage2D(GL_TEXTURE_2D, 0, GL_RGB, static_cast<GLsizei>(w_), static_cast<GLsizei>(h_), 0,
+                         GL_RGB, GL_UNSIGNED_SHORT_5_6_5, lastFrame_.data());
+    } else if (frameDirty_) {
+        gl::f.TexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(w_), static_cast<GLsizei>(h_),
+                            GL_RGB, GL_UNSIGNED_SHORT_5_6_5, lastFrame_.data());
+    }
+    frameDirty_ = false;
+    gl::f.UseProgram(probeProgram_);
+    gl::f.Uniform1i(gl::f.GetUniformLocation(probeProgram_, "tex"), 0);
+    // Row 0 of the frame is its top: the bottom vertices take t = 1.
+    static const GLfloat pos[] = {0, 0, 1, 0, 0, 1, 1, 1};
+    static const GLfloat uv[] = {0, 1, 1, 1, 0, 0, 1, 0};
+    for (GLuint i = 0; i < 8; ++i) gl::f.DisableVertexAttribArray(i);
+    gl::f.EnableVertexAttribArray(0);
+    gl::f.EnableVertexAttribArray(1);
+    gl::f.VertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, pos);
+    gl::f.VertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, uv);
+    gl::f.Viewport(game.x, screenH_ - game.y - game.h, game.w, game.h);
+    gl::f.DrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    return true;
 }

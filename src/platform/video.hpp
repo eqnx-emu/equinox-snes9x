@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "platform/gl.hpp"
 #include "video_art.hpp"
 #include "video_layout.hpp"
 #include "video_prefs.hpp"
@@ -16,7 +17,8 @@
 class Video {
 public:
     // The screen starts at the renderer output size.
-    bool init(SDL_Window* window, bool showFps);
+    // glProbe: draw the game through a plain GL program (development check).
+    bool init(SDL_Window* window, bool showFps, bool glProbe = false);
     ~Video();
 
     void setScreen(int w, int h);
@@ -44,6 +46,8 @@ private:
     void drawFps();
     SDL_Texture* makeTexture(const Image& img, SDL_ScaleMode scale, SDL_BlendMode blend);
     void applyGameScaleMode();
+    void initGl();
+    bool drawProbe(const Rect& game);
 
     SDL_Renderer* renderer_ = nullptr;
     int screenW_ = 1280, screenH_ = 720;
@@ -67,6 +71,14 @@ private:
     bool showFps_ = false;
     bool native565_ = true;
     std::vector<uint32_t> lut_;  // RGB565 to ARGB8888 when the renderer lacks RGB565
+    std::vector<uint16_t> lastFrame_;  // the last frame, rows packed (w_ * h_)
+    bool frameDirty_ = false;          // lastFrame_ changed since GL last read it
+
+    bool glReady_ = false;  // GL entry points loaded; shader filters possible
+    gl::Info glInfo_;
+    bool glProbe_ = false;
+    GLuint probeTex_ = 0, probeProgram_ = 0;
+    unsigned probeW_ = 0, probeH_ = 0;
     Uint32 lastTick_ = 0;
     int frames_ = 0;
     int fps_ = 0;
