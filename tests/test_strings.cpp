@@ -5,7 +5,7 @@
 #include "doctest/doctest.h"
 
 TEST_CASE("every string has text in both languages") {
-    for (int i = 0; i <= static_cast<int>(Str::VideoSaveFailed); ++i) {
+    for (int i = 0; i <= static_cast<int>(Str::IntensityStrong); ++i) {
         const auto s = static_cast<Str>(i);
         REQUIRE(tr(Lang::PtBR, s) != nullptr);
         REQUIRE(tr(Lang::EnUS, s) != nullptr);
@@ -26,4 +26,14 @@ TEST_CASE("video strings") {
     CHECK(std::strcmp(tr(Lang::PtBR, Str::Video), "Vídeo") == 0);
     CHECK(std::strcmp(tr(Lang::EnUS, Str::SizeFull), "Full screen") == 0);
     CHECK(std::strcmp(tr(Lang::PtBR, Str::BorderCover), "Capa do jogo") == 0);
+}
+
+TEST_CASE("shader filter and intensity strings") {
+    CHECK(std::strcmp(tr(Lang::PtBR, Str::IntensityStrong), "Forte") == 0);
+    CHECK(std::strcmp(tr(Lang::EnUS, Str::Intensity), "Intensity") == 0);
+    CHECK(std::strcmp(tr(Lang::PtBR, Str::Intensity), "Intensidade") == 0);
+    CHECK(std::strcmp(tr(Lang::PtBR, Str::IntensityLight), "Leve") == 0);
+    CHECK(std::strcmp(tr(Lang::EnUS, Str::IntensityMedium), "Medium") == 0);
+    CHECK(std::strcmp(tr(Lang::PtBR, Str::FilterCrtGeom), "CRT Geom") == 0);
+    CHECK(std::strcmp(tr(Lang::EnUS, Str::FilterZfastCrt), "zfast CRT") == 0);
 }

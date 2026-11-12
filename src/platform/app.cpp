@@ -244,25 +244,9 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
     const VideoSettings globalSettings = resolve(globalPrefs, {});
     const std::string videoFile = videoPrefsPath(args.saves, args.rom);
     VideoSettings videoSettings;
-    // The NTSC filter is drawn by the core, so a paused picture only changes with a new
-    // frame. That frame gets no input and no audio, and the state is put back afterwards:
-    // the game does not move on, nothing it does reaches SRAM, nothing plays on resume.
-    auto refreshPausedFrame = [&] {
-        const auto st = core.serialize();
-        if (st.empty()) return;  // the new filter shows on resume
-        auto onAudio = std::exchange(core.onAudio, nullptr);
-        auto onInput = std::exchange(core.onInput, nullptr);
-        core.runFrame();
-        core.onAudio = std::move(onAudio);
-        core.onInput = std::move(onInput);
-        if (!core.unserialize(st)) std::fprintf(stderr, "could not restore the paused state\n");
-    };
     auto applyVideo = [&](const VideoSettings& s) {
-        const bool ntscChanged = ntscFor(s.filter) != ntscFor(videoSettings.filter);
         videoSettings = s;
         video.setSettings(s);
-        core.setNtsc(ntscFor(s.filter));
-        if (ntscChanged && menu.isOpen()) refreshPausedFrame();
     };
     VideoPrefs gamePrefs = loadPrefs(videoFile);
     applyVideo(resolve(globalPrefs, gamePrefs));

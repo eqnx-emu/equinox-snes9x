@@ -169,8 +169,11 @@ constexpr Entry<Size> kSizes[] = {{"original", Size::Original}, {"8:7", Size::As
     {"4:3", Size::Aspect43}, {"full", Size::Full}};
 constexpr Entry<Smooth> kSmooths[] = {
     {"pixel", Smooth::Pixel}, {"sharp", Smooth::Sharp}, {"soft", Smooth::Soft}};
-constexpr Entry<Filter> kFilters[] = {
-    {"none", Filter::None}, {"scanlines", Filter::Scanlines}, {"ntsc", Filter::Ntsc}};
+constexpr Entry<Filter> kFilters[] = {{"none", Filter::None}, {"scanlines", Filter::Scanlines},
+    {"ntsc", Filter::Ntsc}, {"zfast-crt", Filter::ZfastCrt}, {"crt-easymode", Filter::CrtEasymode},
+    {"crt-lottes", Filter::CrtLottes}, {"crt-hyllian", Filter::CrtHyllian}, {"crt-geom", Filter::CrtGeom}};
+constexpr Entry<Intensity> kIntensities[] = {
+    {"light", Intensity::Light}, {"medium", Intensity::Medium}, {"strong", Intensity::Strong}};
 constexpr Entry<Border> kBorders[] = {{"equinox", Border::Equinox}, {"cover", Border::Cover},
     {"tv", Border::Tv}, {"black", Border::Black}};
 
@@ -202,10 +205,9 @@ void setKey(VideoPrefs& prefs, const std::string& key, const std::string* value)
     };
     if (key == "size") prefs.size = id(kSizes);
     else if (key == "smooth") prefs.smooth = id(kSmooths);
-    else if (key == "filter") {
-        prefs.filter = id(kFilters);
-        if (!kNtscEnabled && prefs.filter == Filter::Ntsc) prefs.filter.reset();
-    } else if (key == "border") prefs.border = id(kBorders);
+    else if (key == "filter") prefs.filter = id(kFilters);
+    else if (key == "border") prefs.border = id(kBorders);
+    else if (key == "intensity") prefs.intensity = id(kIntensities);
 }
 
 }  // namespace
@@ -252,6 +254,7 @@ std::string serializePrefs(const VideoPrefs& prefs) {
     if (prefs.smooth) add("smooth", toId(*prefs.smooth));
     if (prefs.filter) add("filter", toId(*prefs.filter));
     if (prefs.border) add("border", toId(*prefs.border));
+    if (prefs.intensity) add("intensity", toId(*prefs.intensity));
     out += '}';
     return out;
 }
@@ -262,6 +265,7 @@ VideoSettings resolve(const VideoPrefs& global, const VideoPrefs& game) {
     s.smooth = game.smooth.value_or(global.smooth.value_or(s.smooth));
     s.filter = game.filter.value_or(global.filter.value_or(s.filter));
     s.border = game.border.value_or(global.border.value_or(s.border));
+    s.intensity = game.intensity.value_or(global.intensity.value_or(s.intensity));
     return s;
 }
 
@@ -271,6 +275,7 @@ VideoPrefs updateOverrides(VideoPrefs stored, const VideoSettings& global,
     update(stored.smooth, global.smooth, effective.smooth);
     update(stored.filter, global.filter, effective.filter);
     update(stored.border, global.border, effective.border);
+    update(stored.intensity, global.intensity, effective.intensity);
     return stored;
 }
 
@@ -283,6 +288,7 @@ const char* toId(Size v) { return idOf(kSizes, v); }
 const char* toId(Smooth v) { return idOf(kSmooths, v); }
 const char* toId(Filter v) { return idOf(kFilters, v); }
 const char* toId(Border v) { return idOf(kBorders, v); }
+const char* toId(Intensity v) { return idOf(kIntensities, v); }
 
 VideoPrefs loadPrefs(const std::string& path) {
     const auto bytes = readFileWithRecovery(path);  // an interrupted save leaves .bak/.tmp

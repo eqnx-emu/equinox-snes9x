@@ -23,10 +23,8 @@ VideoAction VideoMenu::change(int dir) {
     switch (cursor_) {
         case VideoRow::Size: s_.size = step(s_.size, dir, 4); return VideoAction::Changed;
         case VideoRow::Smooth: s_.smooth = step(s_.smooth, dir, 3); return VideoAction::Changed;
-        case VideoRow::Filter:
-            s_.filter = step(s_.filter, dir, 3);
-            if (s_.filter == Filter::Ntsc && !ntscAllowed_) s_.filter = step(s_.filter, dir, 3);
-            return VideoAction::Changed;
+        case VideoRow::Filter: s_.filter = step(s_.filter, dir, kFilterCount); return VideoAction::Changed;
+        case VideoRow::Intensity: s_.intensity = step(s_.intensity, dir, 3); return VideoAction::Changed;
         case VideoRow::Border:
             s_.border = step(s_.border, dir, 4);
             // The TV frame only fits around Original; elsewhere it would draw black sides.
@@ -70,6 +68,11 @@ Str label(Filter v) {
         case Filter::None: return Str::FilterNone;
         case Filter::Scanlines: return Str::FilterScanlines;
         case Filter::Ntsc: return Str::FilterNtsc;
+        case Filter::ZfastCrt: return Str::FilterZfastCrt;
+        case Filter::CrtEasymode: return Str::FilterCrtEasymode;
+        case Filter::CrtLottes: return Str::FilterCrtLottes;
+        case Filter::CrtHyllian: return Str::FilterCrtHyllian;
+        case Filter::CrtGeom: return Str::FilterCrtGeom;
     }
     return Str::FilterNone;
 }
@@ -82,4 +85,13 @@ Str label(Border v) {
         case Border::Black: return Str::BorderBlack;
     }
     return Str::BorderEquinox;
+}
+
+Str label(Intensity v) {
+    switch (v) {
+        case Intensity::Light: return Str::IntensityLight;
+        case Intensity::Medium: return Str::IntensityMedium;
+        case Intensity::Strong: return Str::IntensityStrong;
+    }
+    return Str::IntensityMedium;
 }

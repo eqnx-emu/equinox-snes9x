@@ -294,14 +294,16 @@ void MenuView::drawIcon(MenuItem icon, int cx, int cy, int size, SDL_Color c) {
 
 void MenuView::drawVideoMenu(const VideoMenu& menu, Lang lang) {
     const Scaled scaled(*this);
-    constexpr int kTitleH = 64, kRows = 6, kValuePx = 28;
+    constexpr int kTitleH = 64, kRows = 7, kValues = 5, kValuePx = 28;
     const int px = sheetLeft(kPanelW);
     fillRound(px, 0, kPanelW, kScreenH, 0, kPanel);
     drawText(tr(lang, Str::VideoTitle), 26, kTitle, px + kPad, kSheetTop);
 
     const VideoSettings& s = menu.settings();
-    const Str values[4] = {label(s.size), label(s.smooth), label(s.filter), label(s.border)};
-    const Str names[kRows] = {Str::Size, Str::Smoothing, Str::Filter, Str::Border, Str::UseDefault, Str::Back};
+    const Str values[kValues] = {label(s.size), label(s.smooth), label(s.filter), label(s.intensity),
+                                 label(s.border)};
+    const Str names[kRows] = {Str::Size, Str::Smoothing, Str::Filter, Str::Intensity, Str::Border,
+                              Str::UseDefault, Str::Back};
     const int right = px + kPanelW - kPad - 8;
     int y = kSheetTop + kTitleH;
     for (int i = 0; i < kRows; ++i, y += kRow) {
@@ -310,7 +312,7 @@ void MenuView::drawVideoMenu(const VideoMenu& menu, Lang lang) {
         const bool sel = menu.cursor() == row;
         if (sel) fillRound(px + 12, y, kPanelW - 24, kRow - 8, 10, kAmberSoft);
         drawText(tr(lang, names[i]), 30, enabled ? (sel ? kAmber : kText) : kMuted, px + kPad + 8, y + 9);
-        if (i >= 4) continue;  // Use default, Back: buttons, no value
+        if (i >= kValues) continue;  // Use default, Back: buttons, no value
         if (!enabled) {
             drawText("—", kValuePx, kMuted, right, y + 11, 2);
             continue;

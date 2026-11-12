@@ -46,6 +46,15 @@ constexpr Pair kTable[] = {
     {"TV de tubo", "CRT TV"},
     {"Preto", "Black"},
     {"Não deu para guardar o ajuste", "Could not save the setting"},
+    {"zfast CRT", "zfast CRT"},
+    {"CRT Easymode", "CRT Easymode"},
+    {"CRT Lottes", "CRT Lottes"},
+    {"CRT Hyllian", "CRT Hyllian"},
+    {"CRT Geom", "CRT Geom"},
+    {"Intensidade", "Intensity"},
+    {"Leve", "Light"},
+    {"Médio", "Medium"},
+    {"Forte", "Strong"},
 };
 }  // namespace
 
