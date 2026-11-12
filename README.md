@@ -17,6 +17,11 @@ Equinox app (a Moonlight fork) to play SNES games.
   is MIT (see `LICENSE`). The MIT terms cover only this code; the built `.nro`
   as a whole is still bound by the Snes9x terms above.
 - `extern/miniz` is MIT (see `extern/miniz/LICENSE`).
+- `romfs/shaders/` holds shaders copied unchanged from libretro/glsl-shaders, each
+  under its own author's license (GPL-2.0-or-later, MIT, Unlicense; two files carry
+  no license header). `romfs/shaders/LICENSES.md` lists them file by file, and the
+  GPL text is in `romfs/shaders/GPL-2.0.txt`. They are packed into the `.nro`'s
+  romfs and read at run time.
 
 ## Build
 
