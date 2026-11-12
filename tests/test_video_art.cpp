@@ -32,12 +32,6 @@ TEST_CASE("backdrop of an empty size is empty") {
     CHECK(equinoxBackdrop(0, 10).px.empty());
 }
 
-TEST_CASE("scanline mask alternates") {
-    auto m = scanlineMask(224);
-    REQUIRE(m.w == 1); REQUIRE(m.h == 448);
-    CHECK((m.px[0] >> 24) == 0); CHECK((m.px[1] >> 24) > 0);
-}
-
 TEST_CASE("blurred cover is darker and smooth") {
     Image c{4, 4, std::vector<uint32_t>(16, 0xFFFFFFFFu)}; c.px[0] = 0xFF000000u;
     auto b = blurCover(c, 8, 8);

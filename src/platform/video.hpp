@@ -7,18 +7,18 @@
 #include <vector>
 
 #include "platform/gl.hpp"
+#include "platform/shader_chain.hpp"
 #include "video_art.hpp"
 #include "video_layout.hpp"
 #include "video_prefs.hpp"
 
-// Streaming RGB565 game texture drawn per the video settings: background, game,
-// scanlines. Every texture is rebuilt only when what it depends on changes (source
+// Streaming RGB565 game texture drawn per the video settings: background, then the
+// game, through the selected shader filter when there is one. Every texture is rebuilt only when what it depends on changes (source
 // size, screen size, settings), never per frame. Optional FPS counter.
 class Video {
 public:
     // The screen starts at the renderer output size.
-    // glProbe: draw the game through a plain GL program (development check).
-    bool init(SDL_Window* window, bool showFps, bool glProbe = false);
+    bool init(SDL_Window* window, bool showFps);
     ~Video();
 
     void setScreen(int w, int h);
@@ -43,7 +43,6 @@ public:
 private:
     void drawBackground(const Rect& game);
     void drawFrame(const Rect& game);
-    void drawScanlines(const Rect& game);
     bool tvFrameShown() const;
     void ensureTv(const Rect& game);
     void drawMesh(const std::vector<SDL_Vertex>& v, const std::vector<int>& idx);
@@ -51,7 +50,8 @@ private:
     SDL_Texture* makeTexture(const Image& img, SDL_ScaleMode scale, SDL_BlendMode blend);
     void applyGameScaleMode();
     void initGl();
-    bool drawProbe(const Rect& game);
+    void updateChain();
+    bool drawChain(const Rect& game);
 
     SDL_Renderer* renderer_ = nullptr;
     int screenW_ = 1280, screenH_ = 720;
@@ -61,8 +61,6 @@ private:
     unsigned w_ = 0, h_ = 0;
     SDL_Texture* sharp_ = nullptr;  // Sharp: the frame enlarged by whole factors with nearest
     unsigned sharpW_ = 0, sharpH_ = 0;
-    SDL_Texture* scan_ = nullptr;
-    unsigned scanRows_ = 0;
     SDL_Texture* backdrop_ = nullptr;  // Equinox border, for the current screen
     SDL_Texture* cover_ = nullptr;
     // TV frame: the room behind it, then meshes under and over the game, built for tvRect_.
@@ -80,9 +78,12 @@ private:
 
     bool glReady_ = false;  // GL entry points loaded; shader filters possible
     gl::Info glInfo_;
-    bool glProbe_ = false;
-    GLuint probeTex_ = 0, probeProgram_ = 0;
-    unsigned probeW_ = 0, probeH_ = 0;
+    ShaderChain chain_;
+    // The filter and intensity the chain was built for (or failed to build for: a
+    // failure is not retried, nor logged again, until they change).
+    Filter chainFilter_ = Filter::None;
+    Intensity chainIntensity_ = Intensity::Medium;
+    unsigned frameCount_ = 0;
     Uint32 lastTick_ = 0;
     int frames_ = 0;
     int fps_ = 0;
