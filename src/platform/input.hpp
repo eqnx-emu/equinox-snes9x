@@ -21,7 +21,7 @@ public:
     struct Edges {
         bool up = false, down = false, left = false, right = false;  // D-pad or left stick
         bool confirm = false, back = false;                          // A, B
-        bool menuCombo = false;                                         // ZL+ZR together
+        bool menuCombo = false;                                      // Minus+Plus together
     };
     Edges poll();
     // True once if player 1's pad was unplugged since the last call.
