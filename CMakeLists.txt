@@ -75,6 +75,8 @@ if (NINTENDO_SWITCH)
     target_link_libraries(equinox-snes9x PRIVATE
         ${SNES9X_LIB} SDL2_ttf SDL2 freetype harfbuzz freetype png bz2 z EGL glapi drm_nouveau nx)
 
+    target_compile_definitions(equinox-snes9x PRIVATE EQX_APP_VERSION="${APP_VERSION}")
+
     nx_generate_nacp(equinox-snes9x.nacp NAME "${APP_TITLE}" AUTHOR "${APP_AUTHOR}" VERSION "${APP_VERSION}")
     nx_create_nro(equinox-snes9x NACP equinox-snes9x.nacp ICON ${APP_ICON}
         ROMFS ${CMAKE_CURRENT_SOURCE_DIR}/romfs)

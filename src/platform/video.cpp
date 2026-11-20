@@ -435,6 +435,17 @@ void Video::flip() {
     if (renderer_) SDL_RenderPresent(renderer_);
 }
 
+void Video::setVsync(bool on) {
+    if (renderer_ && SDL_RenderSetVSync(renderer_, on ? 1 : 0) != 0)
+        std::fprintf(stderr, "SDL_RenderSetVSync(%d) failed: %s\n", on ? 1 : 0, SDL_GetError());
+}
+
+void Video::finishGl() {
+    if (!renderer_) return;
+    SDL_RenderFlush(renderer_);
+    if (glReady_) gl::f.Finish();
+}
+
 void Video::present() {
     drawGame();
     flip();

@@ -23,6 +23,8 @@ public:
 
     void setScreen(int w, int h);
     void setSettings(const VideoSettings& settings);
+    // False when the selected filter could not be built and the game draws without it.
+    bool filterActive() const { return settings_.filter == Filter::None || chain_.loaded(); }
     // Takes an already blurred cover; an empty image removes it.
     void setCover(Image blurred);
     bool hasCover() const { return cover_ != nullptr; }
@@ -34,6 +36,9 @@ public:
     // present() split in two, so the menu can draw over the game frame.
     void drawGame();
     void flip();
+    void setVsync(bool on);
+    // Waits until the GPU has drawn everything queued, SDL's batch included.
+    void finishGl();
     SDL_Renderer* renderer() const { return renderer_; }
     // The last frame the core sent, RGB565 rows packed; empty before the first one.
     const std::vector<uint16_t>& lastFrame() const { return lastFrame_; }

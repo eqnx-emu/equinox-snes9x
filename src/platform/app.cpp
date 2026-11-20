@@ -16,6 +16,7 @@
 
 #include "args.hpp"
 #include "async_writer.hpp"
+#include "benchmark.hpp"
 #include "core.hpp"
 #include "core_options.hpp"
 #include "file_io.hpp"
@@ -443,6 +444,81 @@ static void gameLoop(const LaunchArgs& args, SDL_Window* window, bool docked, Vi
     g_sram.flush();  // exit: before the scheduled return to Equinox fires
 }
 
+// The benchmark log, open for appending, when the marker was there; the marker is then
+// already gone, so a crash mid-run does not benchmark every launch. Without a log, or
+// when the marker cannot be deleted, the game plays as usual and the marker stays.
+static std::FILE* takeBenchMarker() {
+    struct stat st{};
+    if (stat(kBenchMarker, &st) != 0) return nullptr;
+    std::FILE* log = std::fopen(kBenchLog, "a");
+    if (!log) {
+        std::fprintf(stderr, "benchmark: could not open %s\n", kBenchLog);
+        return nullptr;
+    }
+    if (std::remove(kBenchMarker) != 0) {
+        std::fprintf(stderr, "benchmark: could not delete %s\n", kBenchMarker);
+        std::fclose(log);
+        return nullptr;
+    }
+    return log;
+}
+
+// Benchmark mode (benchmark.hpp): the game, from its savestate when there is one, through
+// every filter and intensity with vsync off, no input and no sound. A frame is timed from
+// before the core runs to after the drawing has finished on the GPU; the flip is left out.
+// Ends by returning to Equinox, like Exit in the menu. Each run is appended to the log.
+static void runBenchmark(const LaunchArgs& args, SDL_Window* window, bool docked, Video& video, Audio& audio,
+                         Core& core, std::FILE* log) {
+    const std::string title = args.title.empty() ? romStem(args.rom) : args.title;
+    std::fputs(reportHeader(EQX_APP_VERSION, title).c_str(), log);
+    const auto st = readFile(statePath(args.states, args.rom));
+    const char* state = !st ? "missing" : core.unserialize(*st) ? "loaded" : "failed";
+    std::fprintf(log, "# state: %s\n", state);
+    std::fflush(log);
+    core.onInput = nullptr;
+    audio.pause(true);
+    video.setVsync(false);
+    VideoSettings settings = resolve(loadPrefs(args.video), loadPrefs(videoPrefsPath(args.saves, args.rom)));
+    const double freq = static_cast<double>(SDL_GetPerformanceFrequency());
+    bool running = true;
+    for (const BenchStep& step : benchSteps()) {
+        settings.filter = step.filter;
+        settings.intensity = step.intensity;
+        video.setSettings(settings);
+        if (!video.filterActive()) {
+            std::fputs(unavailableLine(step).c_str(), log);
+            std::fflush(log);
+            continue;
+        }
+        FrameStats stats;
+        const Uint64 start = SDL_GetPerformanceCounter();
+        for (;;) {
+            SDL_Event e;
+            while (SDL_PollEvent(&e))
+                if (e.type == SDL_QUIT) running = false;
+            followDock(window, video, docked);
+            const Uint64 t0 = SDL_GetPerformanceCounter();
+            const double elapsed = (t0 - start) / freq;
+            if (!running || elapsed >= kBenchStepSec) break;
+            core.runFrame();
+            video.drawGame();
+            video.finishGl();
+            if (elapsed >= kBenchWarmupSec) stats.add((SDL_GetPerformanceCounter() - t0) * 1000.0 / freq);
+            video.flip();
+        }
+        if (!running) {
+            std::fprintf(log, "# aborted at %s %s\n", toId(step.filter), toId(step.intensity));
+            break;
+        }
+        std::fputs(reportLine(step, stats).c_str(), log);
+        std::fflush(log);
+    }
+    if (running) std::fputs("# done\n", log);
+    std::fclose(log);
+    video.setVsync(true);
+    if (!scheduleReturn(args)) std::fprintf(stderr, "scheduleReturn failed: loader cannot chain-load\n");
+}
+
 // While the core is attached to the SRAM saver: on every way out of the session,
 // exceptions included, unhook the applet callback, write the SRAM and detach.
 class SramSession {
@@ -515,7 +591,10 @@ static void run(const std::optional<LaunchArgs>& args, bool showFps, SDL_Window*
                         std::fprintf(stderr, "cover too large for memory: %s\n", args->cover.c_str());
                     }
                 }
-                {
+                // Without the SRAM session the run never writes the battery save.
+                if (std::FILE* log = takeBenchMarker()) {
+                    runBenchmark(*args, window, docked, video, audio, core, log);
+                } else {
                     SramSession session(core, srmPath(args->saves, args->rom));
                     gameLoop(*args, window, docked, video, input, audio, core, view);
                 }
