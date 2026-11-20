@@ -6,6 +6,7 @@ namespace {
 // libnx SDL2 joystick button indices.
 enum { kA, kB, kX, kY, kLStick, kRStick, kL, kR, kZL, kZR, kPlus, kMinus, kLeft, kUp, kRight, kDown };
 constexpr int kDeadzone = 16000;
+static_assert(kMenuComboMask == ((1u << RETRO_DEVICE_ID_JOYPAD_SELECT) | (1u << RETRO_DEVICE_ID_JOYPAD_START)));
 }  // namespace
 
 void Input::init() {
@@ -65,7 +66,13 @@ void Input::handleEvent(const SDL_Event& e) {
 
 int16_t Input::state(unsigned port, unsigned id) {
     const bool held = rawState(port, id) != 0;
-    return port > 1 || id > 15 ? held : release_[port].filter(id, held);
+    if (port > 1 || id > 15) return held;
+    if (id == RETRO_DEVICE_ID_JOYPAD_SELECT || id == RETRO_DEVICE_ID_JOYPAD_START) {
+        const uint32_t combo = (rawState(port, RETRO_DEVICE_ID_JOYPAD_SELECT) ? 1u << RETRO_DEVICE_ID_JOYPAD_SELECT : 0) |
+                               (rawState(port, RETRO_DEVICE_ID_JOYPAD_START) ? 1u << RETRO_DEVICE_ID_JOYPAD_START : 0);
+        release_[port].hideMenuCombo(combo);
+    }
+    return release_[port].filter(id, held);
 }
 
 void Input::suppressHeld() {
@@ -110,7 +117,7 @@ Input::Edges Input::poll() {
         right |= SDL_JoystickGetButton(j, kRight) || ax > kDeadzone;
         a |= SDL_JoystickGetButton(j, kA) != 0;
         b |= SDL_JoystickGetButton(j, kB) != 0;
-        combo |= SDL_JoystickGetButton(j, kZL) && SDL_JoystickGetButton(j, kZR);
+        combo |= SDL_JoystickGetButton(j, kMinus) && SDL_JoystickGetButton(j, kPlus);
     }
     Edges e;
     e.up = up && !prevUp_;
