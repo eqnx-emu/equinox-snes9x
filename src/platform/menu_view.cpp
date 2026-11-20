@@ -437,8 +437,9 @@ void MenuView::drawVideoMenu(const VideoMenu& menu, Lang lang) {
     drawValueRow(tr(lang, Str::Size), tr(lang, label(s.size)), sel(VideoRow::Size), true, left, y, width, kH, 22);
     y += kH + kGap;
 
-    drawValueRow(tr(lang, Str::Smoothing), tr(lang, label(s.smooth)), sel(VideoRow::Smooth), true, left, y, width, kH,
-                 22);
+    const bool smoothOn = menu.rowEnabled(VideoRow::Smooth);
+    drawValueRow(tr(lang, Str::Smoothing), smoothOn ? tr(lang, label(s.smooth)) : tr(lang, Str::SmoothOffWithFilter),
+                 sel(VideoRow::Smooth), smoothOn, left, y, width, kH, smoothOn ? 22 : 17);
     y += kH + kGap;
 
     if (sel(VideoRow::Filter)) {
@@ -447,12 +448,10 @@ void MenuView::drawVideoMenu(const VideoMenu& menu, Lang lang) {
         fillRound(left, y, width, kOpenH, 14, kAmberSoft);
         drawValueRow(tr(lang, Str::Filter), tr(lang, label(s.filter)), true, true, left, y + 2, width, 56, 22, false);
         const int cy2 = y + 68;
-        // NTSC is the last filter; without it there are two.
-        constexpr int kFilters = kNtscEnabled ? 3 : 2;
-        constexpr int kDotsW = (kFilters - 1) * 8 + 22 + (kFilters - 1) * 6;
+        constexpr int kDotsW = 7 * 8 + 22 + 7 * 6;
         drawTextMid(fit(tr(lang, description(s.filter)), 16, width - 32 - kDotsW - 16), 16, kDesc, left + 16, cy2);
         int dx = right - kDotsW;
-        for (int i = 0; i < kFilters; ++i) {
+        for (int i = 0; i < kFilterCount; ++i) {
             const bool on = i == static_cast<int>(s.filter);
             const int dw = on ? 22 : 8;
             fillRound(dx, cy2 - 4, dw, 8, 4, on ? kAmber : kDot);
@@ -462,6 +461,32 @@ void MenuView::drawVideoMenu(const VideoMenu& menu, Lang lang) {
     } else {
         drawValueRow(tr(lang, Str::Filter), tr(lang, label(s.filter)), false, true, left, y, width, kH, 22);
         y += kH + kGap;
+    }
+
+    {
+        constexpr int kIntH = 64;
+        const bool on = menu.rowEnabled(VideoRow::Intensity);
+        const bool here = sel(VideoRow::Intensity);
+        if (!on) {
+            drawValueRow(tr(lang, Str::Intensity), "—", false, false, left, y, width, kIntH, 22);
+        } else {
+            const int cy = y + kIntH / 2;
+            if (here) fillRound(left, y, width, kIntH, 14, kAmberSoft);
+            drawTextMid(tr(lang, Str::Intensity), 22, here ? kAmber : kText, left + 16, cy);
+            const Intensity levels[3] = {Intensity::Light, Intensity::Medium, Intensity::Strong};
+            int segW[3], total = 4;
+            for (int i = 0; i < 3; ++i) total += (segW[i] = textWidth(tr(lang, label(levels[i])), 18) + 28) + 4;
+            int sx = right - total;
+            fillRound(sx, cy - 20, total, 40, 12, kSegment);
+            sx += 4;
+            for (int i = 0; i < 3; ++i) {
+                const bool active = s.intensity == levels[i];
+                if (active) fillRound(sx, cy - 16, segW[i], 32, 9, kLine);
+                drawTextMid(tr(lang, label(levels[i])), 18, active ? kText : kSecondary, sx + segW[i] / 2, cy, 1);
+                sx += segW[i] + 4;
+            }
+        }
+        y += kIntH + kGap;
     }
 
     const bool borderOn = menu.rowEnabled(VideoRow::Border);

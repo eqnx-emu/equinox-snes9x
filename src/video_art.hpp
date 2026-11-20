@@ -13,9 +13,6 @@ struct Image {
 // resolution; the caller enlarges it with nearest filtering.
 Image equinoxBackdrop(int w, int h);
 
-// 1 x (2 * rows): even rows transparent, odd rows dark.
-Image scanlineMask(unsigned rows);
-
 // Cover scaled to fill outW x outH (excess cropped), blurred and darkened.
 // An empty cover or output gives an empty image.
 Image blurCover(const Image& cover, int outW, int outH);

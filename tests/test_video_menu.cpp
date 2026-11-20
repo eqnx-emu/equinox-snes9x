@@ -55,7 +55,7 @@ TEST_CASE("cursor stops at the ends") {
 
 TEST_CASE("left and right move between the two buttons") {
     VideoMenu m(VideoSettings{});
-    for (int i = 0; i < 10; ++i) m.moveCursor(1);
+    for (int i = 0; i < 4; ++i) m.moveCursor(1);
     REQUIRE(m.cursor() == VideoRow::UseDefault);
     CHECK(m.change(1) == VideoAction::None);
     CHECK(m.cursor() == VideoRow::Back);
@@ -70,10 +70,8 @@ TEST_CASE("left and right move between the two buttons") {
 }
 
 TEST_CASE("up from either button goes to the last value row") {
-    VideoSettings orig;
-    orig.size = Size::Original;
-    VideoMenu m(orig);
-    for (int i = 0; i < 10; ++i) m.moveCursor(1);
+    VideoMenu m(VideoSettings{});
+    for (int i = 0; i < 4; ++i) m.moveCursor(1);
     m.change(1);
     REQUIRE(m.cursor() == VideoRow::Back);
     m.moveCursor(-1);
@@ -81,34 +79,79 @@ TEST_CASE("up from either button goes to the last value row") {
     VideoSettings full;
     full.size = Size::Full;
     VideoMenu f(full);
-    for (int i = 0; i < 10; ++i) f.moveCursor(1);
+    for (int i = 0; i < 6; ++i) f.moveCursor(1);
     f.change(1);
     f.moveCursor(-1);
     CHECK(f.cursor() == VideoRow::Filter);
 }
 
-TEST_CASE("filter never reaches ntsc when it is not allowed") {
-    VideoMenu m(VideoSettings{}, false);
+TEST_CASE("filter cycles through the eight filters") {
+    VideoMenu m(VideoSettings{});
     m.moveCursor(1);
     m.moveCursor(1);
-    CHECK(m.cursor() == VideoRow::Filter);
-    m.change(1);
-    CHECK(m.settings().filter == Filter::Scanlines);
-    m.change(1);
-    CHECK(m.settings().filter == Filter::None);
+    REQUIRE(m.cursor() == VideoRow::Filter);
+    const Filter order[] = {Filter::Scanlines, Filter::Ntsc, Filter::ZfastCrt, Filter::CrtEasymode,
+                            Filter::CrtLottes, Filter::CrtHyllian, Filter::CrtGeom, Filter::None};
+    for (Filter f : order) {
+        CHECK(m.change(1) == VideoAction::Changed);
+        CHECK(m.settings().filter == f);
+    }
     m.change(-1);
-    CHECK(m.settings().filter == Filter::Scanlines);
+    CHECK(m.settings().filter == Filter::CrtGeom);
 }
 
-TEST_CASE("filter reaches ntsc when allowed") {
-    VideoMenu m(VideoSettings{}, true);
+TEST_CASE("intensity is off without a filter, smoothing is off with one") {
+    VideoMenu none(VideoSettings{});
+    CHECK_FALSE(none.rowEnabled(VideoRow::Intensity));
+    CHECK(none.rowEnabled(VideoRow::Smooth));
+    VideoSettings s;
+    s.filter = Filter::ZfastCrt;
+    VideoMenu crt(s);
+    CHECK(crt.rowEnabled(VideoRow::Intensity));
+    CHECK_FALSE(crt.rowEnabled(VideoRow::Smooth));
+}
+
+TEST_CASE("the cursor skips the disabled row") {
+    VideoMenu none(VideoSettings{});
+    none.moveCursor(1);
+    none.moveCursor(1);
+    none.moveCursor(1);
+    CHECK(none.cursor() == VideoRow::Border);
+    VideoSettings s;
+    s.filter = Filter::CrtGeom;
+    VideoMenu crt(s);
+    crt.moveCursor(1);
+    CHECK(crt.cursor() == VideoRow::Filter);
+    crt.moveCursor(1);
+    CHECK(crt.cursor() == VideoRow::Intensity);
+}
+
+TEST_CASE("intensity cycles light, medium, strong") {
+    VideoSettings s;
+    s.filter = Filter::CrtGeom;
+    VideoMenu m(s);
+    m.moveCursor(1);
+    m.moveCursor(1);
+    REQUIRE(m.cursor() == VideoRow::Intensity);
+    m.change(1);
+    CHECK(m.settings().intensity == Intensity::Strong);
+    m.change(1);
+    CHECK(m.settings().intensity == Intensity::Light);
+    m.change(1);
+    CHECK(m.settings().intensity == Intensity::Medium);
+}
+
+TEST_CASE("changing the filter keeps smoothing and intensity") {
+    VideoSettings s;
+    s.smooth = Smooth::Soft;
+    s.intensity = Intensity::Strong;
+    VideoMenu m(s);
     m.moveCursor(1);
     m.moveCursor(1);
     m.change(1);
     m.change(1);
-    CHECK(m.settings().filter == Filter::Ntsc);
-    m.change(1);
-    CHECK(m.settings().filter == Filter::None);
+    CHECK(m.settings().smooth == Smooth::Soft);
+    CHECK(m.settings().intensity == Intensity::Strong);
 }
 
 TEST_CASE("tv border is offered only in original") {
@@ -163,7 +206,7 @@ TEST_CASE("confirm and back") {
 
 TEST_CASE("change on the buttons leaves the settings alone") {
     VideoMenu m(VideoSettings{});
-    for (int i = 0; i < 10; ++i) m.moveCursor(1);
+    for (int i = 0; i < 4; ++i) m.moveCursor(1);
     m.change(1);
     m.change(-1);
     CHECK(m.settings() == VideoSettings{});
@@ -181,16 +224,20 @@ TEST_CASE("labels have text") {
         CHECK(std::strlen(tr(Lang::EnUS, label(v))) > 0);
     for (Smooth v : {Smooth::Pixel, Smooth::Sharp, Smooth::Soft})
         CHECK(std::strlen(tr(Lang::PtBR, label(v))) > 0);
-    for (Filter v : {Filter::None, Filter::Scanlines, Filter::Ntsc})
+    for (Filter v : {Filter::None, Filter::Scanlines, Filter::Ntsc, Filter::ZfastCrt, Filter::CrtEasymode,
+                     Filter::CrtLottes, Filter::CrtHyllian, Filter::CrtGeom})
         CHECK(std::strlen(tr(Lang::PtBR, label(v))) > 0);
+    for (Intensity v : {Intensity::Light, Intensity::Medium, Intensity::Strong})
+        CHECK(std::strlen(tr(Lang::EnUS, label(v))) > 0);
     for (Border v : {Border::Equinox, Border::Cover, Border::Tv, Border::Black})
         CHECK(std::strlen(tr(Lang::EnUS, label(v))) > 0);
     CHECK(label(Size::Aspect87) == Str::Size87);
 }
 
 TEST_CASE("every filter has a description") {
-    for (Filter v : {Filter::None, Filter::Scanlines, Filter::Ntsc})
+    for (Filter v : {Filter::None, Filter::Scanlines, Filter::Ntsc, Filter::ZfastCrt, Filter::CrtEasymode,
+                     Filter::CrtLottes, Filter::CrtHyllian, Filter::CrtGeom})
         CHECK(std::strlen(tr(Lang::PtBR, description(v))) > 0);
-    CHECK(description(Filter::Scanlines) != description(Filter::Ntsc));
-    CHECK(std::strcmp(tr(Lang::PtBR, description(Filter::Scanlines)), "Linhas escuras entre as linhas da imagem") == 0);
+    CHECK(description(Filter::CrtLottes) != description(Filter::CrtGeom));
+    CHECK(std::strcmp(tr(Lang::PtBR, description(Filter::CrtLottes)), "TV de tubo com máscara de fósforo") == 0);
 }

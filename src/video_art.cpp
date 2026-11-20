@@ -60,16 +60,6 @@ Image equinoxBackdrop(int w, int h) {
     return img;
 }
 
-Image scanlineMask(unsigned rows) {
-    Image img;
-    if (rows == 0) return img;
-    img.w = 1;
-    img.h = static_cast<int>(rows * 2);
-    img.px.resize(rows * 2);
-    for (unsigned i = 0; i < rows * 2; i++) img.px[i] = (i & 1) ? 0x6B000000u : 0x00000000u;
-    return img;
-}
-
 Image blurCover(const Image& cover, int outW, int outH) {
     Image out;
     if (cover.w <= 0 || cover.h <= 0 || outW <= 0 || outH <= 0) return out;

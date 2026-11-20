@@ -199,6 +199,7 @@ bool Video::init(SDL_Window* window, bool showFps) {
                       ((b << 3) | (b >> 2));
         }
     }
+    initGl();
     int w = 0, h = 0;
     if (SDL_GetRendererOutputSize(renderer_, &w, &h) != 0) SDL_GetWindowSize(window, &w, &h);
     screenW_ = screenH_ = 0;
@@ -207,7 +208,12 @@ bool Video::init(SDL_Window* window, bool showFps) {
 }
 
 Video::~Video() {
-    for (SDL_Texture** t : {&tex_, &sharp_, &scan_, &backdrop_, &cover_, &tvRoom_})
+    if (glReady_ && chain_.loaded()) {  // while the renderer's GL context still exists
+        SDL_RenderFlush(renderer_);
+        const gl::StateGuard guard;
+        chain_.unload();
+    }
+    for (SDL_Texture** t : {&tex_, &sharp_, &backdrop_, &cover_, &tvRoom_})
         destroy(*t);
     if (renderer_) SDL_DestroyRenderer(renderer_);
 }
@@ -244,6 +250,7 @@ void Video::setSettings(const VideoSettings& settings) {
         sharpW_ = sharpH_ = 0;
     }
     applyGameScaleMode();
+    updateChain();
 }
 
 void Video::setCover(Image blurred) {
@@ -259,6 +266,11 @@ void Video::applyGameScaleMode() {
 
 void Video::upload(const void* px, unsigned w, unsigned h, size_t pitch) {
     if (!renderer_ || !px) return;
+    lastFrame_.resize(static_cast<size_t>(w) * h);
+    for (unsigned y = 0; y < h; ++y)
+        std::memcpy(&lastFrame_[static_cast<size_t>(y) * w], static_cast<const char*>(px) + y * pitch,
+                    w * sizeof(uint16_t));
+    frameDirty_ = true;
     if (!tex_ || w != w_ || h != h_) {
         if (tex_) SDL_DestroyTexture(tex_);
         tex_ = SDL_CreateTexture(renderer_,
@@ -274,11 +286,6 @@ void Video::upload(const void* px, unsigned w, unsigned h, size_t pitch) {
         SDL_SetTextureBlendMode(tex_, SDL_BLENDMODE_NONE);
         applyGameScaleMode();
     }
-    // Kept on the CPU so saving a state can store a picture of the game.
-    lastFrame_.resize(static_cast<size_t>(w) * h);
-    for (unsigned y = 0; y < h; ++y)
-        std::memcpy(&lastFrame_[static_cast<size_t>(y) * w], static_cast<const uint8_t*>(px) + y * pitch,
-                    w * sizeof(uint16_t));
     if (native565_) {
         SDL_UpdateTexture(tex_, nullptr, px, static_cast<int>(pitch));
         return;
@@ -406,18 +413,6 @@ void Video::drawFrame(const Rect& game) {
     SDL_RenderCopy(renderer_, tex_, nullptr, &dst);
 }
 
-void Video::drawScanlines(const Rect& game) {
-    const unsigned rows = logicalH(h_);
-    if (rows != scanRows_) {  // a failed mask is not retried every frame
-        destroy(scan_);
-        scanRows_ = rows;
-        scan_ = makeTexture(scanlineMask(rows), SDL_ScaleModeNearest, SDL_BLENDMODE_BLEND);
-    }
-    if (!scan_) return;
-    const SDL_Rect dst = toSdl(game);
-    SDL_RenderCopy(renderer_, scan_, nullptr, &dst);
-}
-
 void Video::drawGame() {
     if (!renderer_) return;
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
@@ -425,8 +420,7 @@ void Video::drawGame() {
     const Rect game = tex_ ? gameRect(settings_.size, w_, h_, screenW_, screenH_) : Rect{0, 0, 0, 0};
     drawBackground(game);
     if (game.w > 0) {
-        drawFrame(game);
-        if (settings_.filter == Filter::Scanlines) drawScanlines(game);
+        if (!drawChain(game)) drawFrame(game);
         if (tvFrameShown()) {
             const SDL_Rect clip = toSdl(game);
             SDL_RenderSetClipRect(renderer_, &clip);
@@ -441,7 +435,64 @@ void Video::flip() {
     if (renderer_) SDL_RenderPresent(renderer_);
 }
 
+void Video::setVsync(bool on) {
+    if (renderer_ && SDL_RenderSetVSync(renderer_, on ? 1 : 0) != 0)
+        std::fprintf(stderr, "SDL_RenderSetVSync(%d) failed: %s\n", on ? 1 : 0, SDL_GetError());
+}
+
+void Video::finishGl() {
+    if (!renderer_) return;
+    SDL_RenderFlush(renderer_);
+    if (glReady_) gl::f.Finish();
+}
+
 void Video::present() {
     drawGame();
     flip();
+}
+
+// MARK: - Shader filters
+
+void Video::initGl() {
+    glReady_ = gl::load();
+    if (glReady_) glInfo_ = gl::queryInfo();
+    else std::fprintf(stderr, "GL entry points missing: shader filters off\n");
+    SDL_version v;
+    SDL_GetVersion(&v);
+    std::fprintf(stderr, "SDL %d.%d.%d\n", v.major, v.minor, v.patch);
+}
+
+// Builds the chain for the current filter and intensity, once per change. With no
+// filter, no GL or a chain that fails, the game draws through SDL as before.
+void Video::updateChain() {
+    if (settings_.filter == chainFilter_ && settings_.intensity == chainIntensity_) return;
+    chainFilter_ = settings_.filter;
+    chainIntensity_ = settings_.intensity;
+    const char* preset = presetPath(settings_.filter);
+    if (!renderer_ || !glReady_ || (!preset && !chain_.loaded())) return;
+    SDL_RenderFlush(renderer_);
+    const gl::StateGuard guard;
+    if (!preset) {
+        chain_.unload();
+        return;
+    }
+    if (!chain_.load(std::string(kShaderRoot) + preset,
+                     intensityOverrides(settings_.filter, settings_.intensity), glInfo_)) {
+        std::fprintf(stderr, "filter %s (%s) off: the game draws without it\n", toId(settings_.filter),
+                     toId(settings_.intensity));
+        return;
+    }
+    frameDirty_ = true;  // a paused game shows its last frame through the new filter
+}
+
+bool Video::drawChain(const Rect& game) {
+    if (!chain_.loaded() || lastFrame_.empty()) return false;
+    SDL_RenderFlush(renderer_);
+    const gl::StateGuard guard;
+    if (frameDirty_) {
+        chain_.upload(lastFrame_.data(), w_, h_);
+        frameDirty_ = false;
+    }
+    // GL's origin is the bottom left.
+    return chain_.draw(game.x, screenH_ - game.y - game.h, game.w, game.h, frameCount_++);
 }

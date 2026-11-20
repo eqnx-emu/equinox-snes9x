@@ -6,11 +6,11 @@
 
 enum class Size { Original, Aspect87, Aspect43, Full };
 enum class Smooth { Pixel, Sharp, Soft };
-enum class Filter { None, Scanlines, Ntsc };
+enum class Filter { None, Scanlines, Ntsc, ZfastCrt, CrtEasymode, CrtLottes, CrtHyllian, CrtGeom };
+inline constexpr int kFilterCount = 8;
+// How strong a shader filter is; Medium is the shader's own defaults.
+enum class Intensity { Light, Medium, Strong };
 enum class Border { Equinox, Cover, Tv, Black };
-
-// Flipped off when the NTSC filter fails the on-device 60 fps gate.
-inline constexpr bool kNtscEnabled = true;
 
 // What a JSON file says. An absent key follows the default beneath it.
 struct VideoPrefs {
@@ -18,8 +18,9 @@ struct VideoPrefs {
     std::optional<Smooth> smooth;
     std::optional<Filter> filter;
     std::optional<Border> border;
+    std::optional<Intensity> intensity;
 
-    bool empty() const { return !size && !smooth && !filter && !border; }
+    bool empty() const { return !size && !smooth && !filter && !border && !intensity; }
 };
 
 // Everything resolved; the initializers are the defaults.
@@ -28,6 +29,7 @@ struct VideoSettings {
     Smooth smooth = Smooth::Pixel;
     Filter filter = Filter::None;
     Border border = Border::Equinox;
+    Intensity intensity = Intensity::Medium;
 
     bool operator==(const VideoSettings&) const = default;
 };
@@ -58,3 +60,4 @@ const char* toId(Size);
 const char* toId(Smooth);
 const char* toId(Filter);
 const char* toId(Border);
+const char* toId(Intensity);

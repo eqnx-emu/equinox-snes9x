@@ -131,8 +131,65 @@ TEST_CASE("cover border without cover falls back to equinox") {
     CHECK(effectiveBorder(s, true) == Border::Cover);
 }
 
-TEST_CASE("ntsc parses only when enabled") {
-    CHECK(parsePrefs(R"({"filter":"ntsc"})").filter.has_value() == kNtscEnabled);
+TEST_CASE("old ntsc and scanlines ids still parse") {
+    CHECK(parsePrefs(R"({"filter":"ntsc"})").filter == Filter::Ntsc);
+    CHECK(parsePrefs(R"({"filter":"scanlines"})").filter == Filter::Scanlines);
+}
+
+TEST_CASE("shader filter and intensity parse") {
+    const VideoPrefs p = parsePrefs(R"({"filter":"crt-geom","intensity":"strong"})");
+    CHECK(p.filter == Filter::CrtGeom);
+    CHECK(p.intensity == Intensity::Strong);
+}
+
+TEST_CASE("every filter id round-trips") {
+    for (Filter f : {Filter::None, Filter::Scanlines, Filter::Ntsc, Filter::ZfastCrt, Filter::CrtEasymode,
+                     Filter::CrtLottes, Filter::CrtHyllian, Filter::CrtGeom}) {
+        VideoPrefs p;
+        p.filter = f;
+        CHECK(parsePrefs(serializePrefs(p)).filter == f);
+    }
+    CHECK(std::string(toId(Filter::ZfastCrt)) == "zfast-crt");
+    CHECK(std::string(toId(Filter::CrtEasymode)) == "crt-easymode");
+    CHECK(std::string(toId(Filter::CrtLottes)) == "crt-lottes");
+    CHECK(std::string(toId(Filter::CrtHyllian)) == "crt-hyllian");
+    CHECK(std::string(toId(Filter::CrtGeom)) == "crt-geom");
+}
+
+TEST_CASE("every intensity id round-trips") {
+    for (Intensity i : {Intensity::Light, Intensity::Medium, Intensity::Strong}) {
+        VideoPrefs p;
+        p.intensity = i;
+        CHECK(serializePrefs(p).find("\"intensity\"") != std::string::npos);
+        CHECK(parsePrefs(serializePrefs(p)).intensity == i);
+    }
+    CHECK(std::string(toId(Intensity::Light)) == "light");
+    CHECK(std::string(toId(Intensity::Medium)) == "medium");
+    CHECK(std::string(toId(Intensity::Strong)) == "strong");
+}
+
+TEST_CASE("unknown intensity is absent") {
+    CHECK_FALSE(parsePrefs(R"({"intensity":"extreme"})").intensity.has_value());
+}
+
+TEST_CASE("intensity defaults to medium") {
+    CHECK(resolve({}, {}).intensity == Intensity::Medium);
+    VideoPrefs g;
+    g.intensity = Intensity::Light;
+    CHECK(resolve(g, {}).intensity == Intensity::Light);
+}
+
+TEST_CASE("intensity overrides follow the other keys") {
+    VideoSettings global;
+    VideoSettings eff = global;
+    eff.intensity = Intensity::Strong;
+    CHECK(updateOverrides({}, global, eff).intensity == Intensity::Strong);
+    VideoPrefs stored;
+    stored.intensity = Intensity::Strong;
+    CHECK_FALSE(updateOverrides(stored, global, global).intensity.has_value());
+    VideoPrefs kept;
+    kept.intensity = Intensity::Medium;  // untouched, equal to the global: kept
+    CHECK(updateOverrides(kept, global, global).intensity == Intensity::Medium);
 }
 
 #include <filesystem>

@@ -9,7 +9,11 @@ enum class Str {
     SizeOriginal, Size87, Size43, SizeFull, SmoothPixel, SmoothSharp, SmoothSoft,
     FilterNone, FilterScanlines, FilterNtsc, BorderEquinox, BorderCover, BorderTv,
     BorderBlack, VideoSaveFailed,
-    HintChoose, HintBackToGame, HintChange, LastState, VideoHint, DescNone, DescScanlines, DescNtsc
+    FilterZfastCrt, FilterCrtEasymode, FilterCrtLottes, FilterCrtHyllian, FilterCrtGeom,
+    Intensity, IntensityLight, IntensityMedium, IntensityStrong,
+    HintChoose, HintBackToGame, HintChange, LastState, SmoothOffWithFilter, VideoHint,
+    DescNone, DescScanlines, DescNtsc, DescZfastCrt, DescCrtEasymode, DescCrtLottes, DescCrtHyllian,
+    DescCrtGeom
 };
 
 // UTF-8 text, never null.
